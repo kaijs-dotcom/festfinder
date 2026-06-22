@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Event-Scharfschütze)
+name: Profi Fest-Scraper (Geduldiger Jäger)
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Event-Scharfschütze ausführen
+      - name: Jäger ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -28,32 +28,42 @@ jobs:
           import requests
           from playwright.sync_api import sync_playwright
           from bs4 import BeautifulSoup
+          import time
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=minimal"}
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
-              page.wait_for_timeout(5000) # Warten, bis der Kalender lädt
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
               
-              # Suche nach Elementen, die 'event' oder 'date' im Namen haben
+              # Cookie-Banner
+              try: page.locator("button[data-testid='uc-accept-all-button']").click()
+              except: pass
+              
+              # Jetzt wird gejagt: Wir scrollen 5x nach unten
+              for i in range(5):
+                  page.mouse.wheel(0, 1000)
+                  time.sleep(2) # Warten, damit der Kalender die nächsten Einträge lädt
+              
               soup = BeautifulSoup(page.content(), 'html.parser')
-              elements = soup.select("[class*='event'], [class*='calendar-item'], .teaser")
+              # Wir suchen jetzt nach den echten Kalender-Karten, die meist 'a' mit 'event' sind
+              events = soup.select('a[class*="event"], a[class*="teaser"]')
               
-              print(f"Gefundene Kandidaten: {len(elements)}")
+              print(f"Gefundene Kandidaten nach Scrollen: {len(events)}")
               
-              for el in elements:
-                  text = el.get_text(" ", strip=True)
-                  # Wir filtern nach 'Datum'-ähnlichen Strukturen (z.B. 22.06. oder ähnliches)
-                  if len(text) > 20 and any(char.isdigit() for char in text):
+              for ev in events:
+                  title = ev.get_text(" ", strip=True)
+                  link = "https://remstal.de" + ev['href'] if ev['href'].startswith('/') else ev['href']
+                  
+                  if len(title) > 5:
                       requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": text[:50],
+                          "name": title,
                           "veranstalter": "Remstal Tourismus",
                           "datum": "Gefunden",
-                          "link": "https://remstal.de/events/kalender"
+                          "link": link
                       })
               browser.close()
           EOF
