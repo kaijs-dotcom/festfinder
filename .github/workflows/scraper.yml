@@ -12,7 +12,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          pip install beautifulsoup4 requests
+          # Wir installieren jetzt auch lxml für die XML-Verarbeitung
+          pip install beautifulsoup4 requests lxml
           python - << 'EOF'
           import requests
           from bs4 import BeautifulSoup
@@ -21,12 +22,12 @@ jobs:
           sitemap_url = "https://www.schwaebischealb.de/sitemap.xml"
           response = requests.get(sitemap_url, headers={"User-Agent": "FestFinder-Crawler/1.0"})
           
-          soup = BeautifulSoup(response.content, 'xml')
+          # 'lxml-xml' ist der korrekte Parser für XML-Sitemaps
+          soup = BeautifulSoup(response.content, 'lxml-xml')
           urls = [loc.text for loc in soup.find_all('loc') if '/veranstaltungen/' in loc.text]
           
           print(f"Gefundene Event-Seiten: {len(urls)}")
           
-          # Hier würde jetzt der Loop starten, der die einzelnen Seiten besucht...
-          for url in urls[:5]: # Erstmal nur die ersten 5 zum Testen
+          for url in urls[:5]:
               print(f"Besuche: {url}")
           EOF
