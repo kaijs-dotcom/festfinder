@@ -1,4 +1,4 @@
-name: Finaler-Event-Import-V3
+name: Event-Komplett-Pipeline
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   import:
     runs-on: ubuntu-latest
     steps:
-      - name: Daten mit korrekter Klasse importieren
+      - name: Pipeline ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -18,22 +18,34 @@ jobs:
           from bs4 import BeautifulSoup
           
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
-          target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          base_url = "https://www.schwarzwald-tourismus.info"
+          target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          
+          # 1. Tabellen leeren für einen sauberen Test
+          requests.delete(f"{URL}/rest/v1/feste", headers=headers)
+          requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
+          
+          # 2. Quelle registrieren (Upsert-Logik)
+          requests.post(f"{URL}/rest/v1/quellen", headers=headers, json={"name": "Schwarzwald-Tourismus", "url": target_url})
+          
+          # 3. Events laden
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
-          
-          # Wir nutzen jetzt die Klasse, die wir im Log gefunden haben
           events = soup.find_all('div', class_='c-headline__icon-wrapper')
           
-          print(f"Gefundene Event-Boxen: {len(events)}")
+          print(f"Importiere {len(events)} Events...")
           
           for e in events:
-              # Wir suchen den Text innerhalb dieses Containers
-              text = e.get_text(strip=True)
-              
-              if text and len(text) > 5:
-                  print(f"Importiere: {text}")
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": text})
+              name = e.get_text(strip=True)
+              if len(name) > 5:
+                  # Event speichern
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "veranstalter": "Schwarzwald Tourismus"})
+                  
+                  # Keyword-Analyse
+                  keywords = ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']
+                  for kw in keywords:
+                      if kw.lower() in name.lower():
+                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
           EOF
