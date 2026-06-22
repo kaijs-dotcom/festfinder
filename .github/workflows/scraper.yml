@@ -1,4 +1,4 @@
-name: Event-Komplett-Pipeline
+name: Event-Komplett-Pipeline-V4
 
 on:
   workflow_dispatch:
@@ -23,29 +23,39 @@ jobs:
           base_url = "https://www.schwarzwald-tourismus.info"
           target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           
-          # 1. Tabellen leeren für einen sauberen Test
+          # 1. Daten leeren
           requests.delete(f"{URL}/rest/v1/feste", headers=headers)
           requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
           
-          # 2. Quelle registrieren (Upsert-Logik)
-          requests.post(f"{URL}/rest/v1/quellen", headers=headers, json={"name": "Schwarzwald-Tourismus", "url": target_url})
-          
-          # 3. Events laden
+          # 2. Events extrahieren
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
-          events = soup.find_all('div', class_='c-headline__icon-wrapper')
           
-          print(f"Importiere {len(events)} Events...")
+          # Wir suchen gezielt nach Links, die 'veranstaltungen' im Pfad haben
+          # Das schließt Breadcrumbs und Kontakt-Links automatisch aus
+          links = soup.find_all('a', href=True)
+          event_links = [l for l in links if '/veranstaltungen/' in l['href'] and len(l.get_text(strip=True)) > 5]
           
-          for e in events:
-              name = e.get_text(strip=True)
-              if len(name) > 5:
-                  # Event speichern
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "veranstalter": "Schwarzwald Tourismus"})
+          # Uniques entfernen
+          seen_names = set()
+          
+          for link in event_links:
+              name = link.get_text(strip=True)
+              full_link = base_url + link['href']
+              
+              if name not in seen_names and name not in ['Breadcrumb', 'Navigation']:
+                  seen_names.add(name)
+                  print(f"Importiere: {name}")
                   
-                  # Keyword-Analyse
-                  keywords = ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']
-                  for kw in keywords:
+                  # Event speichern
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": name, 
+                      "veranstalter": "Schwarzwald Tourismus",
+                      "link": full_link
+                  })
+                  
+                  # Suchworte
+                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
                       if kw.lower() in name.lower():
                           requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
           EOF
