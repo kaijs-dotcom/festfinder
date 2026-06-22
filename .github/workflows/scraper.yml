@@ -1,41 +1,26 @@
-import os
-import requests
-from bs4 import BeautifulSoup
+name: Event-Import-Pipeline
 
-def run_import():
-    # URL & KEY aus Umgebungsvariablen (so wie es bei dir lief)
-    URL = os.environ.get("SUPABASE_URL")
-    KEY = os.environ.get("SUPABASE_KEY")
-    
-    # Bewährte Header mit Upsert-Zusatz
-    headers = {
-        "apikey": KEY,
-        "Authorization": f"Bearer {KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
-    }
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Damit kannst du den "Run"-Button im Browser nutzen
 
-    # 1. Daten holen
-    response = requests.get("https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen")
-    soup = BeautifulSoup(response.content, "html.parser")
-    
-    # Dein bewährter Selektor
-    events = soup.find_all("div", class_="c-headline__icon-wrapper")
-    
-    for event in events:
-        # Extraktion
-        h3 = event.find("h3")
-        if h3:
-            name = h3.get_text(strip=True)
-            
-            # 2. Daten senden (OHNE DELETE, einfach nur POST)
-            payload = {"name": name, "veranstalter": "Schwarzwald Tourismus"}
-            response = requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
-            
-            if response.status_code in [200, 201]:
-                print(f"Erfolg: {name}")
-            else:
-                print(f"Fehler bei {name}: {response.text}")
-
-if __name__ == "__main__":
-    run_import()
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml
+        
+      - name: Run crawler
+        run: python main.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
