@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Cloudflare-Bypass)
+name: Profi Fest-Scraper (Sitemap-Test)
 
 on:
   workflow_dispatch:
@@ -7,51 +7,30 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup & Scrape
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Installieren
-        run: |
-          pip install playwright requests
-          playwright install chromium
-
-      - name: Cloudflare-Bypass ausführen
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - name: Sitemap-Extraktion
         run: |
           python - << 'EOF'
-          from playwright.sync_api import sync_playwright
-          import os, requests
+          import requests
+          import xml.etree.ElementTree as ET
 
-          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
-          
-          # Die URL der Datenquelle, die wir vorhin gefunden haben
-          API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter%5BclientIncludingManaged%5D=events&filter%5Bdate%5D%5Bafter%5D=today&filter%5Bdate%5D%5Bbefore%5D=next-15&language=de"
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              # Wir nutzen einen "echten" Browser-Kontext, der Cookies akzeptiert
-              context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-              page = context.new_page()
+          # Wir laden die Haupt-Sitemap
+          sitemap_url = "https://remstal.de/sitemap.xml" 
+          try:
+              response = requests.get(sitemap_url, headers={"User-Agent": "Mozilla/5.0"})
+              root = ET.fromstring(response.content)
               
-              # Erst die Seite laden, um Cloudflare-Cookies zu sammeln
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
-              page.wait_for_timeout(10000) # Zeit für Cloudflare-Check
+              # Der Namespace für Sitemaps
+              ns = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
               
-              # Jetzt die API-Daten "im Kontext" des Browsers abrufen
-              # Das geht über page.evaluate, da der Browser bereits "autorisiert" ist
-              data = page.evaluate(f"fetch('{API_URL}').then(r => r.json())")
+              count = 0
+              for loc in root.findall('.//ns:loc', ns):
+                  url = loc.text
+                  # Wir filtern nur die Event-Links
+                  if "/events/" in url:
+                      print(f"Gefundener Event-Link: {url}")
+                      count += 1
               
-              # In Supabase speichern
-              for item in data.get("data", []):
-                  attr = item.get("attributes", {})
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                      "name": attr.get("name", "Event"),
-                      "datum": attr.get("startDate", "Datum n.n."),
-                      "link": "https://remstal.de/events/kalender"
-                  })
-              browser.close()
+              print(f"DEBUG: Insgesamt {count} Event-Links in der Sitemap gefunden.")
+          except Exception as e:
+              print(f"DEBUG: Fehler beim Sitemap-Zugriff: {e}")
           EOF
