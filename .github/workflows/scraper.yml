@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Deep-Dive)
+name: Profi Fest-Scraper (Brechstange)
 
 on:
   workflow_dispatch:
@@ -9,16 +9,12 @@ jobs:
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
-      - name: Setup & Scrape
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
       - name: Installieren
         run: |
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Deep-Dive ausführen
+      - name: Brechstange ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -27,7 +23,6 @@ jobs:
           import os
           import requests
           from playwright.sync_api import sync_playwright
-          from bs4 import BeautifulSoup
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
@@ -37,39 +32,26 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
+              page.wait_for_timeout(10000) # Lange warten auf das dynamische Laden
               
-              # Cookie-Banner
-              try: page.locator("button[data-testid='uc-accept-all-button']").click()
-              except: pass
-
-              # Klick auf den Listen-Button
-              try:
-                  page.get_by_text("Liste").first.click()
-                  page.wait_for_timeout(8000) # Länger warten für das Nachladen
-              except: pass
-
-              # Jetzt suchen wir nach Karten, nicht nach Links
-              soup = BeautifulSoup(page.content(), 'html.parser')
-              # Wir suchen nach typischen Event-Container-Strukturen
-              # Oft sind das 'article'-Tags in einer Ergebnisliste
-              cards = soup.select('article, .event-item, .teaser')
+              # Wir nehmen ALLES, was Text ist, und schauen es uns an
+              # Wir suchen nicht mehr nach Klassen, sondern nach der Seite als Ganzes
+              content = page.evaluate("document.body.innerText")
               
+              # Einfacher Filter: Zeilen, die ein Datum oder Veranstaltungs-Charakter haben
+              lines = content.split('\n')
               count = 0
-              for card in cards:
-                  # Wir nehmen den ganzen Text der Karte als Namen
-                  title = card.get_text(" ", strip=True).split('\n')[0][:80]
-                  # Link innerhalb der Karte finden
-                  link_tag = card.find('a', href=True)
-                  link = "https://remstal.de" + link_tag['href'] if link_tag else "https://remstal.de/events/kalender"
-                  
-                  if len(title) > 10 and "navigation" not in title.lower():
+              for line in lines:
+                  line = line.strip()
+                  # Wenn die Zeile kurz genug ist für einen Titel, aber lang genug für ein Event
+                  if 10 < len(line) < 60 and any(c.isdigit() for c in line):
                       requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": title,
+                          "name": line,
                           "veranstalter": "Remstal Tourismus",
                           "datum": "Gefunden",
-                          "link": link
+                          "link": "https://remstal.de/events/kalender"
                       })
                       count += 1
-              print(f"-> {count} echte Event-Karten extrahiert.")
+              print(f"-> {count} Zeilen als potentielle Events gespeichert.")
               browser.close()
           EOF
