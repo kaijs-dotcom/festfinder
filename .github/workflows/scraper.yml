@@ -1,25 +1,16 @@
-name: Event-Import-Pipeline
-
+name: Event-Import
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Damit kannst du den "Run"-Button im Browser nutzen
-
+  workflow_dispatch:
 jobs:
   import:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-          
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
-        
-      - name: Run crawler
+      - name: Run script
         run: python main.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
