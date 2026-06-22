@@ -1,33 +1,46 @@
-name: Nürtingen-Event-Scraper
+name: Event-Import-Workflow
 
 on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  import:
     runs-on: ubuntu-latest
     steps:
-      - name: Scrape Nürtingen
+      - name: Daten aus Toubiz-API importieren
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          pip install requests beautifulsoup4
           python - << 'EOF'
           import requests
-          from bs4 import BeautifulSoup
+          import os
 
-          target = "https://www.nuertingen.de/stadt-nuertingen/rathaus/aktuelles/veranstaltungskalender/seite-1/suche-none"
-          response = requests.get(target, headers={"User-Agent": "Mozilla/5.0"})
+          URL = os.environ.get("SUPABASE_URL")
+          KEY = os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
-          soup = BeautifulSoup(response.content, 'html.parser')
+          # Wir nutzen die API-URL, die wir schon erfolgreich im Log hatten
+          API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter[clientIncludingManaged]=events&language=de"
           
-          # Wir suchen erst mal allgemein, um die Struktur zu verstehen
-          print("Suche nach Events in der Nürtingen-Struktur...")
+          # Wir tarnen uns als App-Zugriff
+          user_agent = {"User-Agent": "FestFinder-App/1.0 (Baden-Württemberg Region)"}
           
-          # Oft nutzen städtische Seiten Container wie 'div' mit 'event' im Klassennamen
-          events = soup.find_all(lambda tag: tag.name == 'div' and tag.get('class') and any('event' in c for c in tag.get('class')))
+          response = requests.get(API_URL, headers=user_agent)
           
-          print(f"DEBUG: Anzahl gefundener Container mit 'event' im Namen: {len(events)}")
-          
-          for i, e in enumerate(events[:5]): # Zeige uns nur die ersten 5 zum Testen
-              print(f"--- Event {i+1} ---")
-              print(e.get_text(strip=True, separator=' '))
+          if response.status_code == 200:
+              data = response.json()
+              items = data.get("data", [])
+              print(f"Erfolgreich {len(items)} Events gefunden. Import starte...")
+              
+              for item in items:
+                  attr = item.get("attributes", {})
+                  # Daten an Supabase senden
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": attr.get("name"),
+                      "datum": attr.get("startDate")
+                  })
+              print("Import abgeschlossen.")
+          else:
+              print(f"API Fehler: {response.status_code}")
           EOF
