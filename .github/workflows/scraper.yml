@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Smart Radar & Live Keywords)
+name: Profi Fest-Scraper (Diagnose-Radar)
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Live Keywords & Smart Radar ausführen
+      - name: Diagnose-Radar ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -32,126 +32,45 @@ jobs:
           import requests
           from bs4 import BeautifulSoup
           from playwright.sync_api import sync_playwright
-          import re
-          import time
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
-          headers = {
-              "apikey": KEY,
-              "Authorization": f"Bearer {KEY}",
-              "Content-Type": "application/json",
-              "Prefer": "return=minimal"
-          }
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
 
-          # 1. Live-Suchwörter aus Supabase laden
-          fallback_keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest"]
-          keywords = []
-          
-          try:
-              sw_res = requests.get(f"{URL}/rest/v1/suchworte", headers=headers)
-              if sw_res.ok and sw_res.json():
-                  keywords = [row['wort'].lower().strip() for row in sw_res.json() if 'wort' in row and row.get('wort')]
-              
-              if not keywords:
-                  print("-> Tabelle 'suchworte' ist leer. Nutze angepasste Standard-Suchwörter als Fallback.")
-                  keywords = fallback_keywords
-              else:
-                  print(f"-> {len(keywords)} Live-Suchwörter erfolgreich aus Supabase geladen: {keywords}")
-          except Exception as e:
-              print("Fehler beim Laden der Suchwörter aus Supabase, nutze angepasste Favoriten:", e)
-              keywords = fallback_keywords
-
-          # 2. Aktive Quellen laden
+          # Schneller Quellen-Check
           try:
               res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
               quellen = res.json()
           except Exception as e:
-              print("Fehler beim Laden der Quellen:", e)
               quellen = []
 
           for q in quellen:
-              print(f"--- Starte Smart-Radar für: {q['beschreibung']} ---")
-              found_events = []
+              print(f"=== DIAGNOSE FÜR: {q['beschreibung']} ===")
+              print(f"Ziel-URL: {q['url']}")
 
               try:
                   with sync_playwright() as p:
                       browser = p.chromium.launch(headless=True)
                       page = browser.new_page()
-                      page.set_viewport_size({"width": 375, "height": 1200})
+                      page.set_viewport_size({"width": 1280, "height": 800})
                       page.goto(q['url'], wait_until="networkidle", timeout=45000)
+                      page.wait_for_timeout(3000) # Kurze Ruhepause für Scripte
                       
-                      print("   Scanne Portal... Scroll-Vorgang gestartet, um zukünftige Events nachzuladen...")
-                      
-                      # Aggressives Deep-Scrolling bis ans Ende der Seite (für die nächsten 10-14 Tage)
-                      last_height = page.evaluate("document.body.scrollHeight")
-                      for scroll_attempt in range(15):  # Scrollt bis zu 15 Mal tief nach unten
-                          page.mouse.wheel(0, 2000)
-                          page.wait_for_timeout(1500)
-                          new_height = page.evaluate("document.body.scrollHeight")
-                          if new_height == last_height:
-                              # Wenn sich die Höhe nach 3 Versuchen nicht ändert, sind wir am Ende angelangt
-                              if scroll_attempt > 5: 
-                                  break
-                          last_height = new_height
-
-                      soup = BeautifulSoup(page.content(), 'html.parser')
+                      html_content = page.content()
+                      soup = BeautifulSoup(html_content, 'html.parser')
                       browser.close()
 
-                      raw_lines = soup.get_text(separator="\n").split("\n")
-                      lines = [l.strip() for l in raw_lines if l.strip()]
-                      print(f"   {len(lines)} Textzeilen nach Tiefen-Scroll analysiert (Vorher: 300).")
+                      print("\n--- HTML-VORSCHAU (Erste 1500 Zeichen) ---")
+                      print(html_content[:1500])
+                      print("\n----------------------------------------")
 
-                      # RegEx für deutsches Datum oder Wochentage
-                      date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)|(\d{1,2}\s*(juni|juli|aug|sept|okt))', re.IGNORECASE)
-                      day_pattern = re.compile(r'(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|sa\.|so\.)', re.IGNORECASE)
-
-                      for i, line in enumerate(lines):
-                          if any(k in line.lower() for k in keywords):
-                              if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter", "öffnungszeiten", "kontakt"]):
-                                  continue
-                              
-                              start_idx = max(0, i - 2)
-                              end_idx = min(len(lines), i + 3)
-                              context_chunk = lines[start_idx:end_idx]
-                              
-                              has_date = False
-                              date_text = "Siehe Website"
-                              
-                              for chunk in context_chunk:
-                                  if date_pattern.search(chunk) or day_pattern.search(chunk):
-                                      has_date = True
-                                      if len(chunk) < 15 and (date_pattern.search(chunk) or day_pattern.search(chunk)):
-                                          date_text = chunk
-                                      else:
-                                          date_text = chunk[:30]
-
-                              if has_date and 8 < len(line) < 95:
-                                  if line not in [e["title"] for e in found_events]:
-                                      found_events.append({
-                                          "title": line,
-                                          "date": date_text
-                                      })
+                      print(f"\n--- GEFUNDENE LINKS (Insgesamt: {len(soup.find_all('a'))}) ---")
+                      links = [a.get('href') for a in soup.find_all('a') if a.get('href')]
+                      # Zeige die ersten 30 Links zur Analyse
+                      for l in links[:30]:
+                          print(f"Link-Gefunden: {l}")
+                      print("\n----------------------------------------")
 
               except Exception as err:
-                  print("Fehler im Smart-Radar:", err)
-
-              # 3. In Supabase speichern
-              saved_count = 0
-              for ev in found_events[:35]: # Maximale Trefferanzahl leicht erhöht
-                  name = ev["title"]
-                  datum = ev["date"]
-                  
-                  check = requests.get(f"{URL}/rest/v1/feste?name=eq.{name}", headers=headers)
-                  if check.ok and len(check.json()) == 0:
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": name,
-                          "veranstalter": q['beschreibung'],
-                          "datum": datum,
-                          "entfernung": "Region",
-                          "link": q['url']
-                      })
-                      saved_count += 1
-              
-              print(f"-> {len(found_events)} echte Termine isoliert. {saved_count} neu gespeichert.")
+                  print("Kritischer Fehler bei Diagnose:", err)
           EOF
