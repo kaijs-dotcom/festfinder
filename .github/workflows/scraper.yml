@@ -1,4 +1,4 @@
-name: Event-Präzisions-Import
+name: Event-Komplett-Pipeline-V4
 
 on:
   workflow_dispatch:
@@ -20,38 +20,42 @@ jobs:
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
-          target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          base_url = "https://www.schwarzwald-tourismus.info"
+          target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          
+          # 1. Daten leeren
+          requests.delete(f"{URL}/rest/v1/feste", headers=headers)
+          requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
+          
+          # 2. Events extrahieren
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
           
-          # V4-Selektor, der nachweislich die Event-Boxen findet
-          events = soup.find_all('div', class_='c-headline__icon-wrapper')
+          # Wir suchen gezielt nach Links, die 'veranstaltungen' im Pfad haben
+          # Das schließt Breadcrumbs und Kontakt-Links automatisch aus
+          links = soup.find_all('a', href=True)
+          event_links = [l for l in links if '/veranstaltungen/' in l['href'] and len(l.get_text(strip=True)) > 5]
           
-          # Liste für die neuen Daten vorbereiten
-          new_events = []
+          # Uniques entfernen
+          seen_names = set()
           
-          for e in events:
-              # Wir suchen GESTEUERT nur nach der H3-Überschrift (dort steht der Titel sauber)
-              title_tag = e.find('h3')
-              if title_tag:
-                  name = title_tag.get_text(strip=True)
-                  # Filter: Wir wollen keine Menü-Überschriften
-                  if "Tipps" in name or "Navigation" in name:
-                      continue
-                  new_events.append({"name": name, "veranstalter": "Schwarzwald Tourismus"})
-          
-          # Erst wenn wir Daten gefunden haben, löschen wir alt und schreiben neu
-          if len(new_events) > 0:
-              print(f"DEBUG: Gefundene saubere Events: {len(new_events)}")
+          for link in event_links:
+              name = link.get_text(strip=True)
+              full_link = base_url + link['href']
               
-              # Jetzt sicher löschen
-              requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
-              
-              # Jetzt hochladen
-              for ev in new_events:
-                  print(f"Importiere: {ev['name']}")
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json=ev)
-          else:
-              print("FEHLER: Keine Events gefunden. Abbruch zur Sicherheit.")
-              exit(1)
+              if name not in seen_names and name not in ['Breadcrumb', 'Navigation']:
+                  seen_names.add(name)
+                  print(f"Importiere: {name}")
+                  
+                  # Event speichern
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": name, 
+                      "veranstalter": "Schwarzwald Tourismus",
+                      "link": full_link
+                  })
+                  
+                  # Suchworte
+                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
+                      if kw.lower() in name.lower():
+                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
           EOF
