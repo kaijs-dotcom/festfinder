@@ -1,4 +1,4 @@
-name: Event-Komplett-Pipeline-V4
+name: Event-Pipeline-Final-Fix
 
 on:
   workflow_dispatch:
@@ -18,44 +18,45 @@ jobs:
           from bs4 import BeautifulSoup
           
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          # WICHTIG: Das "Prefer" Header ist für Supabase wichtig
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
           base_url = "https://www.schwarzwald-tourismus.info"
           target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           
-          # 1. Daten leeren
-          requests.delete(f"{URL}/rest/v1/feste", headers=headers)
-          requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
+          # 1. SAUBERES LÖSCHEN (mit ID-Filter, sonst passiert bei Supabase nichts)
+          requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
+          requests.delete(f"{URL}/rest/v1/suchworte?id=gte.0", headers=headers)
           
-          # 2. Events extrahieren
+          # 2. SEITE LADEN
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
           
-          # Wir suchen gezielt nach Links, die 'veranstaltungen' im Pfad haben
-          # Das schließt Breadcrumbs und Kontakt-Links automatisch aus
-          links = soup.find_all('a', href=True)
-          event_links = [l for l in links if '/veranstaltungen/' in l['href'] and len(l.get_text(strip=True)) > 5]
+          # 3. GEZIELTE EXTRAKTION
+          # Wir suchen nur noch nach den Links, die wirklich Event-Titel enthalten
+          # Die Webseite nutzt oft 'h3' für Titel innerhalb der Event-Boxen
+          events = soup.find_all('div', class_='c-headline__icon-wrapper')
           
-          # Uniques entfernen
-          seen_names = set()
-          
-          for link in event_links:
-              name = link.get_text(strip=True)
-              full_link = base_url + link['href']
-              
-              if name not in seen_names and name not in ['Breadcrumb', 'Navigation']:
-                  seen_names.add(name)
-                  print(f"Importiere: {name}")
+          for e in events:
+              # Wir suchen gezielt nur nach dem Text im h3 oder dem ersten starken Element
+              title_element = e.find(['h3', 'h4', 'strong'])
+              if title_element:
+                  name = title_element.get_text(strip=True)
+                  full_link = base_url + e.find('a')['href'] if e.find('a') else ""
                   
-                  # Event speichern
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                      "name": name, 
-                      "veranstalter": "Schwarzwald Tourismus",
-                      "link": full_link
-                  })
-                  
-                  # Suchworte
-                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
-                      if kw.lower() in name.lower():
-                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
+                  # Wir filtern Duplikate und "leere" Titel aus
+                  if len(name) > 5:
+                      print(f"Importiere: {name}")
+                      
+                      # Event speichern
+                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                          "name": name, 
+                          "veranstalter": "Schwarzwald Tourismus",
+                          "link": full_link
+                      })
+                      
+                      # Suchworte
+                      for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
+                          if kw.lower() in name.lower():
+                              requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
           EOF
