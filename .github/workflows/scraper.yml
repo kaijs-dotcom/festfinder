@@ -1,4 +1,4 @@
-name: Sitemap-Crawler-Pilot
+name: Multi-Region-Event-Crawler
 
 on:
   workflow_dispatch:
@@ -7,27 +7,34 @@ jobs:
   crawl:
     runs-on: ubuntu-latest
     steps:
-      - name: Sitemap-Links extrahieren
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - name: Multi-Region Scan
         run: |
-          # Wir installieren jetzt auch lxml für die XML-Verarbeitung
           pip install beautifulsoup4 requests lxml
           python - << 'EOF'
           import requests
           from bs4 import BeautifulSoup
-          
-          # Wir laden die Sitemap der Schwäbischen Alb
-          sitemap_url = "https://www.schwaebischealb.de/sitemap.xml"
-          response = requests.get(sitemap_url, headers={"User-Agent": "FestFinder-Crawler/1.0"})
-          
-          # 'lxml-xml' ist der korrekte Parser für XML-Sitemaps
-          soup = BeautifulSoup(response.content, 'lxml-xml')
-          urls = [loc.text for loc in soup.find_all('loc') if '/veranstaltungen/' in loc.text]
-          
-          print(f"Gefundene Event-Seiten: {len(urls)}")
-          
-          for url in urls[:5]:
-              print(f"Besuche: {url}")
+
+          # Hier kannst du einfach weitere Regionen hinzufügen
+          targets = [
+              {"name": "Schwaebische Alb", "url": "https://www.schwaebischealb.de/sitemap.xml"},
+              {"name": "Schwarzwald", "url": "https://www.schwarzwald-tourismus.info/sitemap.xml"},
+              # ... hier kannst du weitere einfügen
+          ]
+
+          for target in targets:
+              print(f"--- Prüfe: {target['name']} ---")
+              try:
+                  response = requests.get(target['url'], headers={"User-Agent": "FestFinder-Bot/2.0"}, timeout=10)
+                  soup = BeautifulSoup(response.content, 'lxml-xml')
+                  links = [loc.text for loc in soup.find_all('loc')]
+                  
+                  # Wir filtern nach Keywords, die auf Events hinweisen
+                  event_links = [l for l in links if any(k in l for k in ['veranstaltung', 'event', 'termin'])]
+                  
+                  print(f"Gefunden: {len(event_links)} potenzielle Event-Links.")
+                  for link in event_links[:3]: # Zeige die ersten 3
+                      print(f" -> {link}")
+                      
+              except Exception as e:
+                  print(f"Fehler bei {target['name']}: {e}")
           EOF
