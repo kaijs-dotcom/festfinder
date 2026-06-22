@@ -1,61 +1,69 @@
-name: Event-Komplett-Pipeline-V4
+import os
+import requests
+import re
+from bs4 import BeautifulSoup
 
-on:
-  workflow_dispatch:
+def run_crawler():
+    # 1. Konfiguration aus GitHub Secrets laden
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+    target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
 
-jobs:
-  import:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Pipeline ausführen
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: |
-          pip install beautifulsoup4 requests lxml
-          python - << 'EOF'
-          import requests, os
-          from bs4 import BeautifulSoup
-          
-          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
-          
-          base_url = "https://www.schwarzwald-tourismus.info"
-          target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
-          
-          # 1. Daten leeren
-          requests.delete(f"{URL}/rest/v1/feste", headers=headers)
-          requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
-          
-          # 2. Events extrahieren
-          response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
-          soup = BeautifulSoup(response.content, 'lxml')
-          
-          # Wir suchen gezielt nach Links, die 'veranstaltungen' im Pfad haben
-          # Das schließt Breadcrumbs und Kontakt-Links automatisch aus
-          links = soup.find_all('a', href=True)
-          event_links = [l for l in links if '/veranstaltungen/' in l['href'] and len(l.get_text(strip=True)) > 5]
-          
-          # Uniques entfernen
-          seen_names = set()
-          
-          for link in event_links:
-              name = link.get_text(strip=True)
-              full_link = base_url + link['href']
-              
-              if name not in seen_names and name not in ['Breadcrumb', 'Navigation']:
-                  seen_names.add(name)
-                  print(f"Importiere: {name}")
-                  
-                  # Event speichern
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                      "name": name, 
-                      "veranstalter": "Schwarzwald Tourismus",
-                      "link": full_link
-                  })
-                  
-                  # Suchworte
-                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
-                      if kw.lower() in name.lower():
-                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
-          EOF
+    if not supabase_url or not supabase_key:
+        print("Fehler: Umgebungsvariablen SUPABASE_URL oder SUPABASE_KEY fehlen.")
+        return
+
+    # 2. Header für den Upsert-Modus (Dank Unique Constraint in Supabase)
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates" 
+    }
+
+    # 3. Webseite laden
+    print(f"Starte Crawler für: {target_url}")
+    response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
+    
+    if response.status_code != 200:
+        print(f"Fehler beim Laden der Seite: {response.status_code}")
+        return
+
+    soup = BeautifulSoup(response.content, 'lxml')
+    
+    # 4. Elemente finden (basierend auf der bewährten Klasse)
+    events = soup.find_all('div', class_='c-headline__icon-wrapper')
+    print(f"Gefundene Elemente: {len(events)}")
+
+    for e in events:
+        # Extraktion
+        h3_tag = e.find('h3')
+        if not h3_tag:
+            continue
+            
+        raw_name = h3_tag.get_text(strip=True)
+        
+        # --- DATEN-PUTZ-FILTER ---
+        # Entfernt Duplikate wie "FührungFührung"
+        clean_name = re.sub(r'(.+?)\1', r'\1', raw_name)
+        
+        # Filter: Überspringe Menü-Elemente, die keine Events sind
+        if any(word in clean_name for word in ["Navigation", "Service", "Tipps"]):
+            continue
+        # -------------------------
+
+        # 5. Daten an Supabase senden
+        payload = {
+            "name": clean_name,
+            "veranstalter": "Schwarzwald Tourismus"
+        }
+
+        resp = requests.post(f"{supabase_url}/rest/v1/feste", headers=headers, json=payload)
+
+        if resp.status_code in [200, 201]:
+            print(f"Erfolgreich gespeichert: {clean_name}")
+        else:
+            print(f"Fehler bei {clean_name}: {resp.status_code} - {resp.text}")
+
+if __name__ == "__main__":
+    run_crawler()
