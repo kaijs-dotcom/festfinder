@@ -1,26 +1,26 @@
-name: Profi Fest-Scraper (Screenshot-Diagnose)
+name: Profi Fest-Scraper (Finaler Event-Extraktor)
 
 on:
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
-  diagnose:
+  scrape:
     runs-on: ubuntu-latest
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
-
-      - name: Setup & Scrape
+      - name: Python einrichten
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      
       - name: Installieren
         run: |
-          pip install playwright requests
+          pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Screenshot erzwingen
+      - name: Event-Extraktion starten
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -28,42 +28,51 @@ jobs:
           python - << 'EOF'
           import os
           import requests
+          from bs4 import BeautifulSoup
           from playwright.sync_api import sync_playwright
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
-          # Fehler beim Abruf der Quelle ignorieren
-          try:
-              res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
-              q = res.json()[0]
-              target_url = q['url']
-          except:
-              target_url = "https://remstal.de/events/kalender"
+          # Suchbegriffe
+          keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest", "weindorf", "besen", "ausschank"]
 
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              page.set_viewport_size({"width": 375, "height": 1200})
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
               
-              print(f"Besuche: {target_url}")
-              page.goto(target_url, wait_until="networkidle", timeout=60000)
-              page.wait_for_timeout(5000)
+              # Cookie-Banner weg
+              try: page.locator("button[data-testid='uc-accept-all-button']").click()
+              except: pass
               
-              # Cookie-Banner versuchen, aber Fehler ignorieren
-              try:
-                  page.locator("button[data-testid='uc-accept-all-button']").click()
-                  print("Cookie-Banner geklickt.")
-              except:
-                  print("Kein Cookie-Banner gefunden, mache trotzdem Foto.")
+              page.wait_for_timeout(3000)
+
+              # Wir suchen jetzt nach den Event-Blöcken. 
+              # Da Remstal oft 'article' oder Container in Listen verwendet:
+              content = page.content()
+              soup = BeautifulSoup(content, 'html.parser')
               
-              page.screenshot(path="debug_ansicht.png")
+              # Wir suchen alle Container, die Event-Infos halten könnten
+              # Meist sind das Elemente mit Klassen wie 'teaser', 'event' oder 'item'
+              items = soup.select("article, .event-teaser, .list-item, li")
+              print(f"-> {len(items)} Elemente in der Liste analysiert.")
+
+              for item in items:
+                  text = item.get_text(" ", strip=True).lower()
+                  # Filter: Enthält es ein Keyword?
+                  if any(k in text for k in keywords):
+                      # Wir extrahieren die erste Zeile als Titel
+                      title = item.get_text(" ", strip=True).split('.')[0][:80]
+                      print(f"-> Treffer: {title}")
+                      
+                      # Ab in die Datenbank
+                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                          "name": title,
+                          "veranstalter": "Remstal Tourismus",
+                          "datum": "n.n.",
+                          "link": "https://remstal.de/events/kalender"
+                      })
               browser.close()
           EOF
-
-      - name: Screenshot hochladen
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screenshot
-          path: debug_ansicht.png
