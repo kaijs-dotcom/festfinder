@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Identitäts-Maskierung)
+name: Profi Fest-Scraper (Cloudflare-Bypass)
 
 on:
   workflow_dispatch:
@@ -7,36 +7,51 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: API-Abruf mit Maske
+      - name: Setup & Scrape
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Installieren
+        run: |
+          pip install playwright requests
+          playwright install chromium
+
+      - name: Cloudflare-Bypass ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
-          import requests
-          import urllib3
-          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+          from playwright.sync_api import sync_playwright
+          import os, requests
+
+          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
-          # Die API-URL
+          # Die URL der Datenquelle, die wir vorhin gefunden haben
           API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter%5BclientIncludingManaged%5D=events&filter%5Bdate%5D%5Bafter%5D=today&filter%5Bdate%5D%5Bbefore%5D=next-15&language=de"
-          
-          # Wir tarnen uns als Chrome-Browser auf einem Mac
-          headers = {
-              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          }
-          
-          try:
-              response = requests.get(API_URL, headers=headers, verify=False)
-              print(f"DEBUG: Status Code: {response.status_code}")
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              # Wir nutzen einen "echten" Browser-Kontext, der Cookies akzeptiert
+              context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+              page = context.new_page()
               
-              if response.status_code == 200:
-                  data = response.json()
-                  items = data.get("data", [])
-                  print(f"DEBUG: Anzahl Events: {len(items)}")
-                  if len(items) > 0:
-                      print(f"DEBUG: Erstes Item: {items[0]}")
-              else:
-                  print(f"DEBUG: Fehler-Antwort vom Server: {response.text[:200]}")
-          except Exception as e:
-              print(f"DEBUG: Fehler: {e}")
+              # Erst die Seite laden, um Cloudflare-Cookies zu sammeln
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
+              page.wait_for_timeout(10000) # Zeit für Cloudflare-Check
+              
+              # Jetzt die API-Daten "im Kontext" des Browsers abrufen
+              # Das geht über page.evaluate, da der Browser bereits "autorisiert" ist
+              data = page.evaluate(f"fetch('{API_URL}').then(r => r.json())")
+              
+              # In Supabase speichern
+              for item in data.get("data", []):
+                  attr = item.get("attributes", {})
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": attr.get("name", "Event"),
+                      "datum": attr.get("startDate", "Datum n.n."),
+                      "link": "https://remstal.de/events/kalender"
+                  })
+              browser.close()
           EOF
