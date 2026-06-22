@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (API-Lauscher)
+name: Profi Fest-Scraper (API-Extraktor)
 
 on:
   workflow_dispatch:
@@ -18,14 +18,13 @@ jobs:
           pip install requests playwright
           playwright install chromium
 
-      - name: API-Lauscher starten
+      - name: API-Daten abgreifen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
           import os
-          import json
           import requests
           from playwright.sync_api import sync_playwright
 
@@ -37,23 +36,32 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               
-              # Wir überwachen die Netzwerkanfragen
+              # Wir sammeln alle Events in einer Liste
+              events_found = []
+
               def handle_response(response):
                   if "events" in response.url and "json" in response.headers.get("content-type", ""):
                       try:
                           data = response.json()
-                          # Wenn wir hier JSON finden, extrahieren wir es
-                          print("API-Daten gefunden!")
+                          # Oft ist das JSON eine Liste oder enthält ein "items" Feld
+                          items = data if isinstance(data, list) else data.get("items", [])
+                          for item in items:
+                              name = item.get("title", item.get("name", "Unbekannt"))
+                              datum = item.get("date", item.get("start_date", "TBA"))
+                              link = "https://remstal.de" + item.get("url", "")
+                              
+                              # In DB speichern
+                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                                  "name": name,
+                                  "veranstalter": "Remstal Tourismus",
+                                  "datum": datum,
+                                  "link": link
+                              })
                       except: pass
               
               page.on("response", handle_response)
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
-              
-              # Jetzt klicken wir auf 'Liste'
-              try:
-                  page.get_by_text("Liste").first.click()
-                  page.wait_for_timeout(5000)
-              except: pass
-              
+              page.get_by_text("Liste").first.click()
+              page.wait_for_timeout(5000)
               browser.close()
           EOF
