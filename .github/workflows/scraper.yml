@@ -33,6 +33,7 @@ jobs:
           from bs4 import BeautifulSoup
           from playwright.sync_api import sync_playwright
           import re
+          import time
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
@@ -43,7 +44,7 @@ jobs:
               "Prefer": "return=minimal"
           }
 
-          # 1. Live-Suchwörter aus Supabase laden (mit deinen neuen Wunsch-Favoriten als Fallback)
+          # 1. Live-Suchwörter aus Supabase laden
           fallback_keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest"]
           keywords = []
           
@@ -77,28 +78,36 @@ jobs:
                   with sync_playwright() as p:
                       browser = p.chromium.launch(headless=True)
                       page = browser.new_page()
-                      page.set_viewport_size({"width": 375, "height": 812})
+                      page.set_viewport_size({"width": 375, "height": 1200})
                       page.goto(q['url'], wait_until="networkidle", timeout=45000)
                       
-                      # Simuliere Scrollen gegen Lazy-Loading
-                      for _ in range(3):
-                          page.mouse.wheel(0, 1500)
-                          page.wait_for_timeout(1000)
+                      print("   Scanne Portal... Scroll-Vorgang gestartet, um zukünftige Events nachzuladen...")
+                      
+                      # Aggressives Deep-Scrolling bis ans Ende der Seite (für die nächsten 10-14 Tage)
+                      last_height = page.evaluate("document.body.scrollHeight")
+                      for scroll_attempt in range(15):  # Scrollt bis zu 15 Mal tief nach unten
+                          page.mouse.wheel(0, 2000)
+                          page.wait_for_timeout(1500)
+                          new_height = page.evaluate("document.body.scrollHeight")
+                          if new_height == last_height:
+                              # Wenn sich die Höhe nach 3 Versuchen nicht ändert, sind wir am Ende angelangt
+                              if scroll_attempt > 5: 
+                                  break
+                          last_height = new_height
 
                       soup = BeautifulSoup(page.content(), 'html.parser')
                       browser.close()
 
                       raw_lines = soup.get_text(separator="\n").split("\n")
                       lines = [l.strip() for l in raw_lines if l.strip()]
-                      print(f"   {len(lines)} Textzeilen analysiert.")
+                      print(f"   {len(lines)} Textzeilen nach Tiefen-Scroll analysiert (Vorher: 300).")
 
-                      # RegEx für deutsches Datum (z.B. 22.06. oder 22. Juni) oder Wochentage
+                      # RegEx für deutsches Datum oder Wochentage
                       date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)|(\d{1,2}\s*(juni|juli|aug|sept|okt))', re.IGNORECASE)
                       day_pattern = re.compile(r'(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|sa\.|so\.)', re.IGNORECASE)
 
                       for i, line in enumerate(lines):
                           if any(k in line.lower() for k in keywords):
-                              # Blockiere statische Menü-Begriffe rigoros
                               if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter", "öffnungszeiten", "kontakt"]):
                                   continue
                               
@@ -106,7 +115,6 @@ jobs:
                               end_idx = min(len(lines), i + 3)
                               context_chunk = lines[start_idx:end_idx]
                               
-                              # Datums-Check im Umfeld
                               has_date = False
                               date_text = "Siehe Website"
                               
@@ -118,7 +126,6 @@ jobs:
                                       else:
                                           date_text = chunk[:30]
 
-                              # Speicher-Filter (nur mit Datum & passender Länge)
                               if has_date and 8 < len(line) < 95:
                                   if line not in [e["title"] for e in found_events]:
                                       found_events.append({
@@ -131,7 +138,7 @@ jobs:
 
               # 3. In Supabase speichern
               saved_count = 0
-              for ev in found_events[:25]:
+              for ev in found_events[:35]: # Maximale Trefferanzahl leicht erhöht
                   name = ev["title"]
                   datum = ev["date"]
                   
