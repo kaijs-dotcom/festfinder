@@ -17,8 +17,6 @@ def run_import():
     # Webseite laden
     response = requests.get("https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen")
     soup = BeautifulSoup(response.content, "html.parser")
-    
-    # JSON-LD finden
     script_tag = soup.find("script", type="application/ld+json")
     
     if script_tag:
@@ -27,24 +25,28 @@ def run_import():
         
         for event in events:
             if event.get("@type") == "Event":
-                name = event.get("name")
-                raw_date = event.get("startDate", "Kein Datum")
-                # Datum bereinigen (nimmt nur den Tag: 2026-06-25)
-                clean_date = raw_date.split('T')[0] if 'T' in raw_date else raw_date
+                # Bereinigung
+                name = event.get("name", "Unbekannt")
+                raw_date = event.get("startDate", "1970-01-01")
+                clean_date = raw_date.split('T')[0]
                 
+                # Payload erstellen
                 payload = {
                     "name": name,
                     "veranstalter": "Schwarzwald Tourismus",
-                    "datum": clean_date
+                    "datum": clean_date 
                 }
                 
-                # Senden an Supabase
+                print(f"DEBUG: Sende Payload: {json.dumps(payload)}")
+                
+                # Senden
                 r = requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
                 
+                # Antwort analysieren
                 if r.status_code in [200, 201]:
-                    print(f"Erfolg: '{name}' mit Datum '{clean_date}' wurde übertragen.")
+                    print(f"ERFOLG: Supabase antwortet mit: {r.json()}")
                 else:
-                    print(f"FEHLER bei '{name}': Status {r.status_code} - {r.text}")
+                    print(f"FEHLER: {r.status_code} - {r.text}")
 
 if __name__ == "__main__":
     run_import()
