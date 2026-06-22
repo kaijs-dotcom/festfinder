@@ -1,40 +1,30 @@
-name: Multi-Region-Event-Crawler
+name: Deep-Event-Crawler
 
 on:
   workflow_dispatch:
 
 jobs:
-  crawl:
+  deep_crawl:
     runs-on: ubuntu-latest
     steps:
-      - name: Multi-Region Scan
+      - name: Event-Daten extrahieren
         run: |
           pip install beautifulsoup4 requests lxml
           python - << 'EOF'
           import requests
           from bs4 import BeautifulSoup
-
-          # Hier kannst du einfach weitere Regionen hinzufügen
-          targets = [
-              {"name": "Schwaebische Alb", "url": "https://www.schwaebischealb.de/sitemap.xml"},
-              {"name": "Schwarzwald", "url": "https://www.schwarzwald-tourismus.info/sitemap.xml"},
-              # ... hier kannst du weitere einfügen
-          ]
-
-          for target in targets:
-              print(f"--- Prüfe: {target['name']} ---")
-              try:
-                  response = requests.get(target['url'], headers={"User-Agent": "FestFinder-Bot/2.0"}, timeout=10)
-                  soup = BeautifulSoup(response.content, 'lxml-xml')
-                  links = [loc.text for loc in soup.find_all('loc')]
-                  
-                  # Wir filtern nach Keywords, die auf Events hinweisen
-                  event_links = [l for l in links if any(k in l for k in ['veranstaltung', 'event', 'termin'])]
-                  
-                  print(f"Gefunden: {len(event_links)} potenzielle Event-Links.")
-                  for link in event_links[:3]: # Zeige die ersten 3
-                      print(f" -> {link}")
-                      
-              except Exception as e:
-                  print(f"Fehler bei {target['name']}: {e}")
+          
+          # Die URL aus dem Log
+          target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
+          
+          soup = BeautifulSoup(response.content, 'lxml')
+          
+          # Hier suchen wir nach den Event-Containern (typischerweise in <h3> oder <div>)
+          # Da jede Seite anders ist, nutzen wir hier einen allgemeinen Ansatz
+          events = soup.find_all(['h2', 'h3', 'div'], class_=['event', 'title', 'teaser'])
+          
+          print(f"Gefundene Elemente auf der Seite: {len(events)}")
+          for i, e in enumerate(events[:5]):
+              print(f"Event {i+1}: {e.get_text(strip=True)}")
           EOF
