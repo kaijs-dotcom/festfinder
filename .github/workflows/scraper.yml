@@ -1,17 +1,26 @@
-name: Event-Import
+name: Event-Pipeline
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
 jobs:
-  import:
+  run-pipeline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
-      - name: Run script
+        
+      - name: Run Crawler
         run: python main.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          
+      - name: Run Cleanup
+        run: python cleanup.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
