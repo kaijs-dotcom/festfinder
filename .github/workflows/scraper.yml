@@ -15,32 +15,32 @@ jobs:
           python - << 'EOF'
           import requests
           import os
-
+          import urllib3
+          
+          # SSL-Warnungen unterdrücken
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+          
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
-          # Wir nutzen die API-URL, die wir schon erfolgreich im Log hatten
           API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter[clientIncludingManaged]=events&language=de"
           
-          # Wir tarnen uns als App-Zugriff
-          user_agent = {"User-Agent": "FestFinder-App/1.0 (Baden-Württemberg Region)"}
-          
-          response = requests.get(API_URL, headers=user_agent)
+          # verify=False ist hier der entscheidende Punkt gegen den SSL-Fehler
+          response = requests.get(API_URL, headers={"User-Agent": "FestFinder-App/1.0"}, verify=False)
           
           if response.status_code == 200:
               data = response.json()
               items = data.get("data", [])
-              print(f"Erfolgreich {len(items)} Events gefunden. Import starte...")
+              print(f"Erfolgreich {len(items)} Events gefunden.")
               
               for item in items:
                   attr = item.get("attributes", {})
-                  # Daten an Supabase senden
                   requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
                       "name": attr.get("name"),
                       "datum": attr.get("startDate")
                   })
               print("Import abgeschlossen.")
           else:
-              print(f"API Fehler: {response.status_code}")
+              print(f"API Fehler: {response.status_code} - Text: {response.text}")
           EOF
