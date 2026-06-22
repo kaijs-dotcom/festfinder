@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Brechstange)
+name: Profi Fest-Scraper (API-Lauscher)
 
 on:
   workflow_dispatch:
@@ -9,18 +9,23 @@ jobs:
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
+      - name: Setup & Scrape
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - name: Installieren
         run: |
-          pip install requests beautifulsoup4 playwright
+          pip install requests playwright
           playwright install chromium
 
-      - name: Brechstange ausführen
+      - name: API-Lauscher starten
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
           import os
+          import json
           import requests
           from playwright.sync_api import sync_playwright
 
@@ -31,27 +36,24 @@ jobs:
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
-              page.wait_for_timeout(10000) # Lange warten auf das dynamische Laden
               
-              # Wir nehmen ALLES, was Text ist, und schauen es uns an
-              # Wir suchen nicht mehr nach Klassen, sondern nach der Seite als Ganzes
-              content = page.evaluate("document.body.innerText")
+              # Wir überwachen die Netzwerkanfragen
+              def handle_response(response):
+                  if "events" in response.url and "json" in response.headers.get("content-type", ""):
+                      try:
+                          data = response.json()
+                          # Wenn wir hier JSON finden, extrahieren wir es
+                          print("API-Daten gefunden!")
+                      except: pass
               
-              # Einfacher Filter: Zeilen, die ein Datum oder Veranstaltungs-Charakter haben
-              lines = content.split('\n')
-              count = 0
-              for line in lines:
-                  line = line.strip()
-                  # Wenn die Zeile kurz genug ist für einen Titel, aber lang genug für ein Event
-                  if 10 < len(line) < 60 and any(c.isdigit() for c in line):
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": line,
-                          "veranstalter": "Remstal Tourismus",
-                          "datum": "Gefunden",
-                          "link": "https://remstal.de/events/kalender"
-                      })
-                      count += 1
-              print(f"-> {count} Zeilen als potentielle Events gespeichert.")
+              page.on("response", handle_response)
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
+              
+              # Jetzt klicken wir auf 'Liste'
+              try:
+                  page.get_by_text("Liste").first.click()
+                  page.wait_for_timeout(5000)
+              except: pass
+              
               browser.close()
           EOF
