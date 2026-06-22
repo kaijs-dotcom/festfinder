@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Mein FestFinder</title>
+    <title>FestFinder Pro</title>
     <style>
         :root {
             --primary: #e65100;
@@ -17,111 +17,171 @@
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
         body { background-color: var(--bg-app); color: var(--text-main); padding: 16px; padding-bottom: 80px; }
-        header { background: linear-gradient(135deg, #b21f00, var(--primary)); color: white; padding: 20px 16px; border-radius: 16px; text-align: center; margin-bottom: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h1 { font-size: 22px; font-weight: 800; }
-        .agent-notification { background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 12px; padding: 14px; margin-bottom: 16px; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .btn-action { display: block; width: 100%; padding: 12px; background: var(--accent-blue); color: white; text-align: center; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+        header { background: linear-gradient(135deg, #b21f00, var(--primary)); color: white; padding: 16px; border-radius: 16px; text-align: center; margin-bottom: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { font-size: 20px; font-weight: 800; }
+        .view { display: none; }
+        .view.active { display: block; }
         .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 12px; font-weight: 700; }
-        .fest-card { background-color: var(--bg-card); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); border: 1px solid var(--border); position: relative; }
-        .tag-badge { position: absolute; top: 14px; right: 14px; background: #fff3e0; padding: 2px 6px; border-radius: 6px; font-size: 12px; }
+        .fest-card { background-color: var(--bg-card); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); border: 1px solid var(--border); }
         .fest-name { font-size: 16px; font-weight: 700; color: #1a202c; margin-bottom: 4px; }
-        .fest-org { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
-        .fest-meta { display: flex; justify-content: space-between; border-top: 1px dashed var(--border); padding-top: 10px; font-size: 12px; font-weight: 600; }
+        .fest-meta { display: flex; justify-content: space-between; border-top: 1px dashed var(--border); padding-top: 10px; font-size: 12px; font-weight: 600; margin-top: 10px; }
         .fest-distance { color: var(--accent-green); }
+        
+        /* Formulare für das Backoffice */
+        .form-group { margin-bottom: 12px; }
+        label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text-main); }
+        input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: white; font-size: 14px; }
+        .btn { display: block; width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; text-align: center; }
+        
+        /* Navigation unten */
+        nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: white; border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
+        .nav-item { font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: center; cursor: pointer; flex: 1; padding: 10px; }
+        .nav-item.active { color: var(--primary); }
+        .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
     </style>
 </head>
 <body>
 
     <header>
-        <h1>⛺ Mein FestFinder v7.2</h1>
-        <p style="font-size: 12px; opacity: 0.9; margin-top: 4px;">Region Nürtingen & Umgebung</p>
+        <h1 id="headerTitle">⛺ Mein FestFinder</h1>
     </header>
 
-    <div class="agent-notification" id="agentBox">
-        <strong style="font-size:14px; color:#1565c0;">🤖 Agenten-Fundstück in der Zwischenablage!</strong>
-        <p style="font-size:12px; margin: 4px 0; color: #424242;" id="agentText">Ein neues Fest wurde im Hintergrund analysiert.</p>
-        <button class="btn-action" onclick="importFromClipboard()">Fest in Liste speichern ✨</button>
+    <!-- ANSICHT 1: FESTE -->
+    <div id="view-feste" class="view active">
+        <div class="section-title">Automatisch gefundene Feste</div>
+        <div id="festListContainer"><p style="text-align:center; color:var(--text-muted); padding:20px;">Lade Feste aus Datenbank...</p></div>
     </div>
 
-    <div class="section-title">Feste im Umkreis</div>
-    <div id="festListContainer"></div>
+    <!-- ANSICHT 2: BACKOFFICE -->
+    <div id="view-backoffice" class="view">
+        <div class="section-title">Quellen-Backoffice</div>
+        <div class="fest-card">
+            <div class="form-group">
+                <label>Neue Quellen-URL (z.B. Eventseite, Vereinskalender)</label>
+                <input type="url" id="quelleUrl" placeholder="https://...">
+            </div>
+            <div class="form-group">
+                <label>Beschreibung / Name der Quelle</label>
+                <input type="text" id="quelleDesc" placeholder="z.B. MV Geislingen Termine">
+            </div>
+            <button class="btn" onclick="saveQuelle()">Quelle im Backoffice speichern 📁</button>
+        </div>
+        
+        <div class="section-title" style="margin-top: 20px;">Aktive Überwachungs-Quellen</div>
+        <div id="quellenListContainer"></div>
+    </div>
+
+    <!-- NAVIGATION UNTEN -->
+    <nav>
+        <div class="nav-item active" onclick="switchView('feste')" id="nav-feste">
+            <span class="nav-icon">🎪</span>Feste
+        </div>
+        <div class="nav-item" onclick="switchView('backoffice')" id="nav-backoffice">
+            <span class="nav-icon">⚙️</span>Backoffice
+        </div>
+    </nav>
 
     <script>
-        const defaultFeste = [
-            { id: 1, name: "Feuerwehrfest Nürtingen", org: "FF Nürtingen", date: "26.06.2026", dist: 1.2, offers: "Essen & Bar" },
-            { id: 2, name: "Traditionelle Sommerhocketse", org: "MV Geislingen", date: "27.06.2026", dist: 8.5, offers: "Essen & Bar" }
-        ];
+        // --- HIER DEINE ZUGANGSDATEN EINTRAGEN ---
+        const SUPABASE_URL = "https://gxtkndjcpyxbxcgzkftf.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_R1C49lO3RszdfAYaDNbxIQ_2HioXmWD";
+        // -----------------------------------------
 
-        let feste = JSON.parse(localStorage.getItem('ff_feste_v7')) || defaultFeste;
-
-        function renderFeste() {
-            const container = document.getElementById('festListContainer');
-            container.innerHTML = '';
+        function switchView(viewName) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             
-            if(feste.length === 0) {
-                container.innerHTML = '<p style="text-align:center; color:#7f8c8d; padding:20px;">Keine Feste eingetragen.</p>';
-                return;
+            document.getElementById('view-' + viewName).classList.add('active');
+            document.getElementById('nav-' + viewName).classList.add('active');
+            
+            if(viewName === 'feste') {
+                loadFeste();
+            } else {
+                loadQuellen();
             }
-
-            feste.forEach(f => {
-                const card = document.createElement('div');
-                card.className = 'fest-card';
-                card.innerHTML = `
-                    <div class="tag-badge">🍖</div>
-                    <div class="fest-name">${f.name}</div>
-                    <div class="fest-org">Veranstalter: ${f.org}</div>
-                    <div class="fest-meta">
-                        <div>📅 ${f.date}</div>
-                        <div class="fest-distance">📍 ${f.dist} km</div>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
         }
 
-        function checkClipboard() {
-            if (!navigator.clipboard || !navigator.clipboard.readText) return;
-            
-            navigator.clipboard.readText().then(text => {
-                if (text.trim().startsWith('{') && text.includes('"name":')) {
-                    try {
-                        const parsed = JSON.parse(text);
-                        if (!feste.some(f => f.name === parsed.name)) {
-                            document.getElementById('agentText').innerText = `Neues Fest erkannt: "${parsed.name}"`;
-                            document.getElementById('agentBox').style.display = 'block';
-                        }
-                    } catch(e) {}
-                }
-            }).catch(() => {});
-        }
-
-        function importFromClipboard() {
-            navigator.clipboard.readText().then(text => {
-                const neues = JSON.parse(text);
-                let formattedDate = neues.date;
-                if(formattedDate.includes('-')) {
-                    formattedDate = formattedDate.split('-').reverse().join('.');
-                }
-                feste.unshift({
-                    id: Date.now(),
-                    name: neues.name,
-                    org: neues.org,
-                    date: formattedDate,
-                    dist: neues.dist,
-                    offers: "Essen"
+        async function loadFeste() {
+            const container = document.getElementById('festListContainer');
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/feste?select=*`, {
+                    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
                 });
-                localStorage.setItem('ff_feste_v7', JSON.stringify(feste));
-                document.getElementById('agentBox').style.display = 'none';
-                renderFeste();
-            });
+                const data = await response.json();
+                container.innerHTML = '';
+                
+                if(!data || data.length === 0) {
+                    container.innerHTML = '<p style="text-align:center; color:#7f8c8d; padding:20px;">Noch keine Feste im Hintergrund gefunden.</p>';
+                    return;
+                }
+
+                data.forEach(f => {
+                    container.innerHTML += `
+                        <div class="fest-card">
+                            <div class="fest-name">${f.name}</div>
+                            <div style="font-size:13px; color:var(--text-muted)">Veranstalter: ${f.veranstalter || 'Unbekannt'}</div>
+                            <div class="fest-meta">
+                                <div>📅 ${f.datum}</div>
+                                <div class="fest-distance">📍 ${f.entfernung || '-'}</div>
+                            </div>
+                        </div>`;
+                });
+            } catch(e) {
+                container.innerHTML = '<p style="text-align:center; color:red; padding:20px;">Fehler beim Laden der Datenbank.</p>';
+            }
         }
 
-        window.onload = () => {
-            renderFeste();
-            localStorage.setItem('ff_feste_v7', JSON.stringify(feste));
-            setTimeout(checkClipboard, 1000);
-        };
-        window.onfocus = () => { checkClipboard(); };
+        async function loadQuellen() {
+            const container = document.getElementById('quellenListContainer');
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/quellen?select=*`, {
+                    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+                });
+                const data = await response.json();
+                container.innerHTML = '';
+                
+                if(!data || data.length === 0) {
+                    container.innerHTML = '<p style="text-align:center; color:#7f8c8d; padding:10px;">Keine Überwachungs-Quellen hinterlegt.</p>';
+                    return;
+                }
+
+                data.forEach(q => {
+                    container.innerHTML += `
+                        <div class="fest-card" style="padding: 10px; font-size:13px;">
+                            <strong>${q.beschreibung}</strong><br>
+                            <span style="color:var(--text-muted); font-size:11px; word-break:break-all;">${q.url}</span>
+                        </div>`;
+                });
+            } catch(e) {}
+        }
+
+        async function saveQuelle() {
+            const url = document.getElementById('quelleUrl').value;
+            const desc = document.getElementById('quelleDesc').value;
+            
+            if(!url || !desc) { alert('Bitte beide Felder ausfüllen!'); return; }
+
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/quellen`, {
+                    method: 'POST',
+                    headers: { 
+                        "apikey": SUPABASE_KEY, 
+                        "Authorization": `Bearer ${SUPABASE_KEY}`,
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal"
+                    },
+                    body: JSON.stringify({ url: url, beschreibung: desc, aktiv_status: true })
+                });
+
+                if(response.ok) {
+                    document.getElementById('quelleUrl').value = '';
+                    document.getElementById('quelleDesc').value = '';
+                    loadQuellen();
+                } else { alert('Fehler beim Speichern.'); }
+            } catch(e) { alert('Verbindungsfehler.'); }
+        }
+
+        window.onload = () => { loadFeste(); };
     </script>
 </body>
 </html>
