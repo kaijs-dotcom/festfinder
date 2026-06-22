@@ -1,4 +1,4 @@
-name: Event-DEBUG-Pipeline
+name: Event-Präzisions-Import
 
 on:
   workflow_dispatch:
@@ -20,29 +20,38 @@ jobs:
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
-          # 1. Verbindung testen
           target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
-          print(f"DEBUG: Webseite Status Code: {response.status_code}")
-          
           soup = BeautifulSoup(response.content, 'lxml')
           
-          # 2. Suche nach Boxen - wir probieren es breiter
-          # Wir suchen nach allen DIVs, die 'c-headline' im Klassennamen haben
-          events = soup.find_all('div', class_=lambda x: x and 'c-headline' in x)
-          print(f"DEBUG: Gefundene Event-Boxen: {len(events)}")
+          # V4-Selektor, der nachweislich die Event-Boxen findet
+          events = soup.find_all('div', class_='c-headline__icon-wrapper')
           
-          if len(events) == 0:
-              print("FEHLER: Keine Elemente gefunden! Prüfe die Struktur.")
-              exit(1)
+          # Liste für die neuen Daten vorbereiten
+          new_events = []
           
-          # 3. Wenn was gefunden wurde, löschen wir erst jetzt (Sicherheit!)
-          requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
-          
-          # 4. Import-Logik
           for e in events:
-              name = e.get_text(strip=True)
-              if len(name) > 5:
-                  print(f"Importiere: {name}")
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "veranstalter": "Schwarzwald Tourismus"})
+              # Wir suchen GESTEUERT nur nach der H3-Überschrift (dort steht der Titel sauber)
+              title_tag = e.find('h3')
+              if title_tag:
+                  name = title_tag.get_text(strip=True)
+                  # Filter: Wir wollen keine Menü-Überschriften
+                  if "Tipps" in name or "Navigation" in name:
+                      continue
+                  new_events.append({"name": name, "veranstalter": "Schwarzwald Tourismus"})
+          
+          # Erst wenn wir Daten gefunden haben, löschen wir alt und schreiben neu
+          if len(new_events) > 0:
+              print(f"DEBUG: Gefundene saubere Events: {len(new_events)}")
+              
+              # Jetzt sicher löschen
+              requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
+              
+              # Jetzt hochladen
+              for ev in new_events:
+                  print(f"Importiere: {ev['name']}")
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json=ev)
+          else:
+              print("FEHLER: Keine Events gefunden. Abbruch zur Sicherheit.")
+              exit(1)
           EOF
