@@ -1,32 +1,39 @@
-name: Event-Struktur-Analyse
+name: Finaler-Event-Import-V3
 
 on:
   workflow_dispatch:
 
 jobs:
-  analyze:
+  import:
     runs-on: ubuntu-latest
     steps:
-      - name: Debug HTML Struktur
+      - name: Daten mit korrekter Klasse importieren
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           pip install beautifulsoup4 requests lxml
           python - << 'EOF'
-          import requests
+          import requests, os
           from bs4 import BeautifulSoup
+          
+          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
           target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
           
-          # Wir suchen jetzt mal nach allen DIVs, um zu sehen, wie die Event-Boxen heißen
-          # Wir schauen uns das erste Div an, das nach einer Event-Box aussieht
-          found_divs = soup.find_all('div')
-          for div in found_divs:
-              classes = div.get('class', [])
-              # Wir suchen nach typischen Event-Klassen
-              if any(c in str(classes) for c in ['teaser', 'event', 'item', 'card']):
-                  print(f"Gefundene Event-Box-Klasse: {classes}")
-                  print("Inhalt der Box:")
-                  print(div.get_text(strip=True)[:500])
-                  break 
+          # Wir nutzen jetzt die Klasse, die wir im Log gefunden haben
+          events = soup.find_all('div', class_='c-headline__icon-wrapper')
+          
+          print(f"Gefundene Event-Boxen: {len(events)}")
+          
+          for e in events:
+              # Wir suchen den Text innerhalb dieses Containers
+              text = e.get_text(strip=True)
+              
+              if text and len(text) > 5:
+                  print(f"Importiere: {text}")
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": text})
           EOF
