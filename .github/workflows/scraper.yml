@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Präzise Event-Karten)
+name: Profi Fest-Scraper (Deep Text-Radar)
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Event-Karten präzise auslesen
+      - name: Deep Text-Radar ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -51,91 +51,74 @@ jobs:
               quellen = []
 
           for q in quellen:
-              print(f"--- Starte präzise Analyse für: {q['beschreibung']} ---")
+              print(f"--- Starte Deep-Text-Radar für: {q['beschreibung']} ---")
               found_events = []
 
-              if "remstal.de" in q['url']:
-                  try:
-                      with sync_playwright() as p:
-                          browser = p.chromium.launch(headless=True)
-                          page = browser.new_page()
-                          print(f"-> Öffne Kalender im virtuellen Browser...")
-                          page.goto(q['url'], wait_until="networkidle", timeout=45000)
-                          
-                          # Sicherstellen, dass die dynamischen Event-Karten gerendert sind
-                          page.wait_for_selector(".article-event, .event, [class*='event']", timeout=10000)
-                          
-                          soup = BeautifulSoup(page.content(), 'html.parser')
-                          browser.close()
+              try:
+                  with sync_playwright() as p:
+                      browser = p.chromium.launch(headless=True)
+                      page = browser.new_page()
+                      
+                      # Wir tun so, als wären wir ein echtes iPhone im Browser, um Sperren zu umgehen
+                      page.set_viewport_size({"width": 375, "height": 812})
+                      page.goto(q['url'], wait_until="networkidle", timeout=45000)
+                      
+                      # Wir scrollen die Seite dreimal nach unten, falls Events erst beim Scrollen nachladen
+                      for _ in range(3):
+                          page.mouse.wheel(0, 1500)
+                          page.wait_for_timeout(1000)
 
-                          # Wir suchen gezielt nach den Containern der einzelnen Events
-                          # Remstal nutzt typischerweise Klassen wie 'article-event' für ihre Kacheln
-                          event_cards = soup.find_all(class_=re.compile(r'article-event|event-item|card-event'))
-                          
-                          # Fallback, falls die Klassen generischer benannt sind
-                          if not event_cards:
-                              event_cards = soup.find_all('div', class_=re.compile(r'event'))
+                      soup = BeautifulSoup(page.content(), 'html.parser')
+                      browser.close()
 
-                          print(f"   {len(event_cards)} eigenständige Event-Kacheln im Code isoliert.")
+                      # Wir holen uns den REINEN sichtbaren Text der kompletten Website
+                      # Jede Zeile wird einzeln geprüft
+                      raw_lines = soup.get_text(separator="\n").split("\n")
+                      lines = [l.strip() for l in raw_lines if l.strip()]
+                      print(f"   {len(lines)} Textzeilen von der Website geladen. Durchsuche nach Festen...")
 
-                          for card in event_cards:
-                              # 1. Titel aus der Überschrift der Kachel extrahieren
-                              title_el = card.find(['h3', 'h4', 'span'], class_=re.compile(r'headline|title|name')) or card.find(['h3', 'h4'])
-                              # 2. Datum aus dem Kalender-Element der Kachel extrahieren
-                              date_el = card.find(class_=re.compile(r'date|time|calendar|day'))
-                              # 3. Direkten Link zum Event extrahieren
-                              link_el = card.find('a', href=True)
+                      # Suchbegriffe für echte Feste & Ausschänke
+                      keywords = ["fest", "hocketse", "hock", "feuerwehr", "ausschank", "vinothek", "weindorf", "besen", "sommerfest", "weinfest", "kirbe"]
 
-                              if title_el:
-                                  title_text = title_el.get_text().strip()
-                                  date_text = date_el.get_text().strip() if date_el else "Siehe Webseite"
-                                  
-                                  # Den Link absolut machen (falls er relativ ist wie /events/...)
-                                  event_link = q['url']
-                                  if link_el:
-                                      href = link_el['href']
-                                      if href.startswith('http'):
-                                          event_link = href
-                                      else:
-                                          event_link = "https://www.remstal.de" + href if href.startswith('/') else "https://www.remstal.de/" + href
+                      for i, line in enumerate(lines):
+                          # Wenn in einer Zeile ein Treffer ist
+                          if any(k in line.lower() for k in keywords):
+                              # Wir ignorieren statische Menütexte
+                              if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter"]):
+                                  continue
+                              
+                              # Wir bauen einen Kontext aus der Zeile davor und danach (oft Datum + Ort)
+                              start_idx = max(0, i - 1)
+                              end_idx = min(len(lines), i + 2)
+                              context_chunk = lines[start_idx:end_idx]
+                              
+                              # Erzeuge einen sauberen Event-Namen
+                              event_title = line
+                              if len(event_title) < 10: # Falls die Zeile zu kurz ist, nimm die nächste dazu
+                                  event_title = " | ".join(context_chunk)
 
-                                  # Nur echte Feste, Hocketser, Ausschänke, Weindörfer und Märkte filtern
-                                  if any(k in title_text.lower() for k in ["fest", "hocketse", "markt", "hock", "ausschank", "vinothek", "weindorf", "besen", "sommerfest"]):
-                                      if title_text not in [e["title"] for e in found_events] and len(title_text) < 100:
-                                          found_events.append({
-                                              "title": title_text,
-                                              "date": date_text,
-                                              "link": event_link
-                                          })
-                  except Exception as err:
-                      print("Fehler beim Auslesen der Remstal-Event-Karten:", err)
-              
-              # UNIVERSAL-FALL: Für einfache Vereinsseiten (falls du später welche aktivierst)
-              else:
-                  try:
-                      with sync_playwright() as p:
-                          browser = p.chromium.launch(headless=True)
-                          page = browser.new_page()
-                          page.goto(q['url'], wait_until="networkidle", timeout=30000)
-                          soup = BeautifulSoup(page.content(), 'html.parser')
-                          lines = [l.strip() for l in soup.get_text().split('\n') if l.strip()]
-                          date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)')
-                          for i, line in enumerate(lines):
-                              if date_pattern.search(line):
-                                  context = " | ".join(lines[max(0, i-1):min(len(lines), i+2)])
-                                  if any(k in context.lower() for k in ["fest", "hocketse", "hock", "feuerwehrfest"]):
-                                      if len(context) < 120 and context not in [e["title"] for e in found_events]:
-                                          found_events.append({"title": context, "date": line, "link": q['url']})
-                          browser.close()
-                  except Exception as err:
-                      print("Fehler beim Vereins-Scrape:", err)
+                              if 8 < len(event_title) < 95:
+                                  if event_title not in [e["title"] for e in found_events]:
+                                      # Versuche ein Datum im Umkreis zu finden
+                                      date_guess = "Siehe Website"
+                                      for chunk in context_chunk:
+                                          if re.search(r'\d{1,2}\.\d{1,2}\.', chunk) or any(m in chunk.lower() for m in ["juni", "juli", "august", "september"]):
+                                              date_guess = chunk
+                                              break
 
-              # 3. Ergebnisse saubermachen und in Supabase pumpen
+                                      found_events.append({
+                                          "title": event_title,
+                                          "date": date_guess
+                                      })
+
+              except Exception as err:
+                  print("Fehler beim Text-Radar:", err)
+
+              # Speichern in Supabase
               saved_count = 0
               for ev in found_events[:25]:
                   name = ev["title"]
-                  # Bereinige Zeilenumbrüche und überschüssige Leerzeichen im Datum
-                  datum = " ".join(ev["date"].split())[:30]
+                  datum = ev["date"][:30]
                   
                   check = requests.get(f"{URL}/rest/v1/feste?name=eq.{name}", headers=headers)
                   if check.ok and len(check.json()) == 0:
@@ -144,9 +127,9 @@ jobs:
                           "veranstalter": q['beschreibung'],
                           "datum": datum,
                           "entfernung": "Region",
-                          "link": ev["link"] # Jetzt wird der exakte Detail-Link mitgespeichert!
+                          "link": q['url']
                       })
                       saved_count += 1
               
-              print(f"-> {len(found_events)} echte Feste gefiltert. {saved_count} davon erfolgreich in Supabase eingetragen.")
+              print(f"-> {len(found_events)} Feste im Text-Radar erkannt. {saved_count} neu gespeichert.")
           EOF
