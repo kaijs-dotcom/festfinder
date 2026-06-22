@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Fix & API)
+name: Profi Fest-Scraper (Passiver Lauscher)
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
           pip install requests playwright
           playwright install chromium
 
-      - name: API-Daten abgreifen
+      - name: Passiver Lauscher
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -35,36 +35,25 @@ jobs:
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
               
-              # 1. Cookie-Banner mit roher Gewalt schließen
-              page.wait_for_timeout(3000)
-              try:
-                  page.evaluate("document.querySelector('#usercentrics-root')?.shadowRoot?.querySelector('button[data-testid=\"uc-accept-all-button\"]')?.click()")
-                  page.wait_for_timeout(2000)
-              except: pass
-
-              # 2. Liste klicken - diesmal mit JS-Klick, falls das Element "unter" dem Banner liegt
-              try:
-                  page.evaluate("document.evaluate(\"//span[text()='Liste']\", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.click()")
-                  page.wait_for_timeout(5000)
-              except Exception as e:
-                  print(f"Klick-Fehler ignoriert: {e}")
-
-              # 3. Daten abgreifen
+              # Hier sammeln wir Daten, sobald sie das Netzwerk passieren
               def handle_response(response):
                   if "events" in response.url and "json" in response.headers.get("content-type", ""):
                       try:
                           data = response.json()
+                          # Versuchen wir, das JSON-Paket direkt zu zerlegen
+                          # Wenn es eine Liste ist, nehmen wir sie direkt
                           items = data if isinstance(data, list) else data.get("items", [])
                           for item in items:
                               name = item.get("title", "Event")
-                              datum = item.get("start_date", "Datum unbekannt")
+                              datum = item.get("start_date", "Datum n.n.")
                               link = "https://remstal.de" + item.get("url", "")
                               requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "datum": datum, "link": link})
                       except: pass
               
               page.on("response", handle_response)
-              page.wait_for_timeout(5000)
+              # Wir laden einfach die Seite und warten, das Skript der Seite erledigt den Rest
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
+              page.wait_for_timeout(10000) # 10 Sekunden Zeit für den Hintergrund-Prozess
               browser.close()
           EOF
