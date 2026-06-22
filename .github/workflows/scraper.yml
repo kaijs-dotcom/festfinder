@@ -1,33 +1,32 @@
-name: BW-Event-Master-Importer
+name: Sitemap-Crawler-Pilot
 
 on:
   workflow_dispatch:
 
 jobs:
-  import:
+  crawl:
     runs-on: ubuntu-latest
     steps:
-      - name: Debug API Antwort
+      - name: Sitemap-Links extrahieren
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
+          pip install beautifulsoup4 requests
           python - << 'EOF'
           import requests
+          from bs4 import BeautifulSoup
           
-          api_url = "https://tourismus-bw.de/api/v1/events?region=baden-wuerttemberg"
-          response = requests.get(api_url, headers={"User-Agent": "FestFinder-Backend/2.0"})
+          # Wir laden die Sitemap der Schwäbischen Alb
+          sitemap_url = "https://www.schwaebischealb.de/sitemap.xml"
+          response = requests.get(sitemap_url, headers={"User-Agent": "FestFinder-Crawler/1.0"})
           
-          print(f"Status Code: {response.status_code}")
+          soup = BeautifulSoup(response.content, 'xml')
+          urls = [loc.text for loc in soup.find_all('loc') if '/veranstaltungen/' in loc.text]
           
-          # Wir drucken den Anfang der Antwort aus, um das Format zu sehen
-          print("Antwort-Inhalt (erste 500 Zeichen):")
-          print(response.text[:500])
+          print(f"Gefundene Event-Seiten: {len(urls)}")
           
-          if response.status_code == 200:
-              try:
-                  data = response.json()
-                  print("JSON erfolgreich geladen!")
-              except Exception as e:
-                  print(f"Fehler beim Parsen: {e}")
+          # Hier würde jetzt der Loop starten, der die einzelnen Seiten besucht...
+          for url in urls[:5]: # Erstmal nur die ersten 5 zum Testen
+              print(f"Besuche: {url}")
           EOF
