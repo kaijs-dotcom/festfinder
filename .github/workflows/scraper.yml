@@ -1,29 +1,36 @@
-name: Deep-Crawler-Debugger
+name: Finaler-Event-Import
 
 on:
   workflow_dispatch:
 
 jobs:
-  debug:
+  import:
     runs-on: ubuntu-latest
     steps:
-      - name: HTML-Inhalt analysieren
+      - name: Daten in Supabase schreiben
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           pip install beautifulsoup4 requests lxml
           python - << 'EOF'
-          import requests
+          import requests, os
           from bs4 import BeautifulSoup
+          
+          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
           target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
-          
-          # Wir lassen uns den Anfang des HTMLs und alle Überschriften zeigen
           soup = BeautifulSoup(response.content, 'lxml')
           
-          print("--- Erste 1000 Zeichen der Seite ---")
-          print(response.text[:1000])
+          # Wir filtern die Überschriften, die nach Events klingen
+          # Wir ignorieren allgemeine Dinge wie "KONTAKT" oder "Navigation"
+          ignore = ['KONTAKT', 'FOLLOW US', 'Breadcrumb', 'Veranstaltungen']
           
-          print("\n--- Alle h2/h3 Überschriften auf der Seite ---")
           for h in soup.find_all(['h2', 'h3']):
-              print(f"Überschrift: {h.get_text(strip=True)}")
+              text = h.get_text(strip=True)
+              if text and text not in ignore and len(text) > 5:
+                  print(f"Importiere: {text}")
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": text})
           EOF
