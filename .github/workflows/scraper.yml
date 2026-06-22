@@ -1,51 +1,32 @@
-name: Finaler-Event-Import-V2
+name: Event-Struktur-Analyse
 
 on:
   workflow_dispatch:
 
 jobs:
-  import:
+  analyze:
     runs-on: ubuntu-latest
     steps:
-      - name: Daten reinigen und importieren
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - name: Debug HTML Struktur
         run: |
           pip install beautifulsoup4 requests lxml
           python - << 'EOF'
-          import requests, os
+          import requests
           from bs4 import BeautifulSoup
-          
-          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
           
           target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
           
-          # Die Blacklist für Müll-Daten
-          blacklist = ['KONTAKT', 'FOLLOW US', 'Breadcrumb', 'Veranstaltungen', 'Unsere Tipps', 'Navigation']
-          
-          # Wir suchen nach den Blöcken, die Events enthalten
-          # Hinweis: Wir probieren verschiedene Klassen, die typisch für diese Seite sind
-          events = soup.find_all('div', class_=['teaser', 'event-item', 'item'])
-          
-          for e in events:
-              title_tag = e.find(['h2', 'h3'])
-              link_tag = e.find('a', href=True)
-              date_tag = e.find(class_=['date', 'event-date', 'time'])
-              
-              if title_tag:
-                  name = title_tag.get_text(strip=True)
-                  if not any(b in name for b in blacklist):
-                      link = "https://www.schwarzwald-tourismus.info" + link_tag['href'] if link_tag else ""
-                      datum = date_tag.get_text(strip=True) if date_tag else "Datum prüfen"
-                      
-                      print(f"Importiere: {name} | {datum}")
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": name,
-                          "datum": datum,
-                          "link": link
-                      })
+          # Wir suchen jetzt mal nach allen DIVs, um zu sehen, wie die Event-Boxen heißen
+          # Wir schauen uns das erste Div an, das nach einer Event-Box aussieht
+          found_divs = soup.find_all('div')
+          for div in found_divs:
+              classes = div.get('class', [])
+              # Wir suchen nach typischen Event-Klassen
+              if any(c in str(classes) for c in ['teaser', 'event', 'item', 'card']):
+                  print(f"Gefundene Event-Box-Klasse: {classes}")
+                  print("Inhalt der Box:")
+                  print(div.get_text(strip=True)[:500])
+                  break 
           EOF
