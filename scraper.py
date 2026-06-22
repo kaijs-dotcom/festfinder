@@ -10,38 +10,42 @@ def run_import():
     headers = {
         "apikey": KEY,
         "Authorization": f"Bearer {KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
     }
 
     # Webseite laden
-    response = requests.get("https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen")
+    response = requests.get("https://www.schwarzwald-tourismus.info/veranstaltungen/die-salpeterer-tour-776ba42bdb")
     soup = BeautifulSoup(response.content, "html.parser")
     
-    # Wir suchen direkt nach dem JSON-LD Block
+    # JSON-LD extrahieren
     script_tag = soup.find("script", type="application/ld+json")
     
     if script_tag:
-        data = json.loads(script_tag.string)
-        
-        # Falls es eine Liste ist (manchmal ist es ein einzelnes Event, manchmal eine Liste)
-        events = data if isinstance(data, list) else [data]
-        
-        for event in events:
-            # Nur Events verarbeiten
-            if event.get("@type") == "Event":
-                name = event.get("name")
-                # Datum extrahieren und das 'T' für die Datenbank lesbar machen
-                start_date = event.get("startDate", "").split('T')[0] 
+        try:
+            data = json.loads(script_tag.string)
+            # Falls es ein Dictionary ist, in eine Liste umwandeln
+            event = data if isinstance(data, dict) else data[0]
+            
+            # Datum sauber extrahieren (nimmt den Teil vor dem 'T')
+            raw_date = event.get("startDate", "1970-01-01")
+            clean_date = raw_date.split('T')[0]
+            
+            payload = {
+                "name": event.get("name"),
+                "veranstalter": "Schwarzwald Tourismus",
+                "datum": clean_date
+            }
+            
+            # An Supabase senden
+            r = requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
+            if r.status_code == 201:
+                print(f"Erfolg: {payload['name']} am {clean_date}")
+            else:
+                print(f"Fehler bei {payload['name']}: {r.text}")
                 
-                payload = {
-                    "name": name, 
-                    "veranstalter": "Schwarzwald Tourismus",
-                    "datum": start_date
-                }
-                
-                # Senden an Supabase
-                requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
-                print(f"Importiert: {name} am {start_date}")
+        except Exception as e:
+            print(f"Fehler beim Parsen: {e}")
 
 if __name__ == "__main__":
     run_import()
