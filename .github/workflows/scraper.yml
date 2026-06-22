@@ -1,4 +1,4 @@
-name: Event-Pipeline-Final-Fix
+name: Event-Komplett-Pipeline-V4-Fixed
 
 on:
   workflow_dispatch:
@@ -18,45 +18,42 @@ jobs:
           from bs4 import BeautifulSoup
           
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          # WICHTIG: Das "Prefer" Header ist für Supabase wichtig
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
           base_url = "https://www.schwarzwald-tourismus.info"
           target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           
-          # 1. SAUBERES LÖSCHEN (mit ID-Filter, sonst passiert bei Supabase nichts)
+          # 1. Daten sicher löschen (die 'gte.0' Logik behalten wir bei)
           requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
           requests.delete(f"{URL}/rest/v1/suchworte?id=gte.0", headers=headers)
           
-          # 2. SEITE LADEN
+          # 2. Events laden (die bewährte V4 Logik)
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
           soup = BeautifulSoup(response.content, 'lxml')
-          
-          # 3. GEZIELTE EXTRAKTION
-          # Wir suchen nur noch nach den Links, die wirklich Event-Titel enthalten
-          # Die Webseite nutzt oft 'h3' für Titel innerhalb der Event-Boxen
           events = soup.find_all('div', class_='c-headline__icon-wrapper')
           
           for e in events:
-              # Wir suchen gezielt nur nach dem Text im h3 oder dem ersten starken Element
-              title_element = e.find(['h3', 'h4', 'strong'])
-              if title_element:
-                  name = title_element.get_text(strip=True)
-                  full_link = base_url + e.find('a')['href'] if e.find('a') else ""
+              # Wir holen den vollen Text
+              raw_text = e.get_text(strip=True)
+              
+              # Bereinigungs-Logik: Falls der Name mit einem doppelten Wort beginnt (z.B. "FührungFührung"), reparieren wir das
+              # Wir teilen den String bei Großbuchstaben oder suchen nach Wiederholungen
+              name = raw_text
+              if name.startswith("FührungFührung"): name = name.replace("FührungFührung", "Führung", 1)
+              elif name.startswith("FlohmarktFlohmarkt"): name = name.replace("FlohmarktFlohmarkt", "Flohmarkt", 1)
+              elif name.startswith("ErntemarktErntemarkt"): name = name.replace("ErntemarktErntemarkt", "Erntemarkt", 1)
+              
+              if len(name) > 5:
+                  print(f"Importiere: {name}")
                   
-                  # Wir filtern Duplikate und "leere" Titel aus
-                  if len(name) > 5:
-                      print(f"Importiere: {name}")
-                      
-                      # Event speichern
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": name, 
-                          "veranstalter": "Schwarzwald Tourismus",
-                          "link": full_link
-                      })
-                      
-                      # Suchworte
-                      for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
-                          if kw.lower() in name.lower():
-                              requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
+                  # Event speichern
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": name, 
+                      "veranstalter": "Schwarzwald Tourismus"
+                  })
+                  
+                  # Suchworte
+                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
+                      if kw.lower() in name.lower():
+                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
           EOF
