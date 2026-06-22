@@ -1,0 +1,85 @@
+name: Automatischer Fest-Scraper
+
+on:
+  schedule:
+    # Läuft jede Nacht um 3:00 Uhr UTC (ca. 4:00/5:00 Uhr deutscher Zeit)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Ermöglicht es uns, den Suchlauf manuell zu testen
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Abhängigkeiten installieren
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Quellen analysieren und Feste finden
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python - << 'EOF'
+          import os
+          import requests
+          from bs4 import BeautifulSoup
+          import json
+
+          # Zugangsdaten laden
+          URL = os.environ.get("SUPABASE_URL")
+          KEY = os.environ.get("SUPABASE_KEY")
+          headers = {
+              "apikey": KEY,
+              "Authorization": f"Bearer {KEY}",
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal"
+          }
+
+          # 1. Aktive Quellen aus Backoffice auslesen
+          try:
+              res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
+              quellen = res.json()
+          except Exception as e:
+              print("Fehler beim Laden der Quellen:", e)
+              quellen = []
+
+          # 2. Schleife durch alle deine URLs
+          for q in quellen:
+              print(f"Scrape Quelle: {q['beschreibung']} ({q['url']})")
+              try:
+                  # Webseite abrufen
+                  page = requests.get(q['url'], timeout=15)
+                  soup = BeautifulSoup(page.text, 'html.parser')
+                  
+                  # Hier simuliert der Agent die Extraktion. 
+                  # (Für eine echte KI-Volltextanalyse binden wir im nächsten Schritt eine kostenlose KI-API ein)
+                  # Testweise erstellen wir ein gefundenes Fest, wenn auf der Seite das Wort "Fest" oder "Hocketse" steht.
+                  webseiten_text = soup.get_text().lower()
+                  
+                  if "fest" in webseiten_text or "hocketse" in webseiten_text or "veranstaltung" in webseiten_text:
+                      # Ein neues Fest vorbereiten
+                      neues_fest = {
+                          "name": f"Event auf {q['beschreibung']}",
+                          "veranstalter": q['beschreibung'],
+                          "datum": "Siehe Webseite",
+                          "entfernung": "Region Nürtingen",
+                          "link": q['url']
+                      }
+                      
+                      # Prüfen, ob dieses Fest schon existiert
+                      check = requests.get(f"{URL}/rest/v1/feste?name=eq.{neues_fest['name']}", headers=headers)
+                      if len(check.json()) == 0:
+                          # In Datenbank speichern
+                          requests.post(f"{URL}/rest/v1/feste", headers=headers, json=neues_fest)
+                          print(f"-> Neues Fest erfolgreich gespeichert: {neues_fest['name']}")
+              except Exception as e:
+                  print(f"Fehler bei Quelle {q['url']}: {e}")
+          EOF
