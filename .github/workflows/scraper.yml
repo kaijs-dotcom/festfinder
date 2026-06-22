@@ -74,35 +74,37 @@ jobs:
                       page.goto(q['url'], wait_until="networkidle", timeout=45000)
                       page.wait_for_timeout(2000)
 
-                      # COOKIE-BANNER WEGKLICKEN (Usercentrics Bypass)
+                      # Cookie-Banner entfernen
                       try:
-                          print("-> Versuche Cookie-Banner (Usercentrics) zu schließen...")
-                          # Usercentrics versteckt den Button im Shadow-DOM. Wir klicken ihn direkt via Selektor an.
                           accept_button = page.locator("id=usercentrics-root >> button[data-testid='uc-accept-all-button']")
                           if accept_button.is_visible(timeout=3000):
                               accept_button.click()
-                              print("   [Erfolgreich] Cookie-Banner weggeklickt!")
                               page.wait_for_timeout(1000)
-                      except Exception as ce:
-                          print("   Kein aktives Cookie-Banner blockiert oder anderer Typ:", ce)
+                      except Exception:
+                          pass
 
-                      print("-> Starte Tiefen-Scroll für die nächsten 14 Tage...")
-                      # Aggressives Scrollen nach Cookie-Freigabe
-                      last_height = page.evaluate("document.body.scrollHeight")
-                      for scroll_attempt in range(12):
-                          page.mouse.wheel(0, 2500)
-                          page.wait_for_timeout(1500)
-                          new_height = page.evaluate("document.body.scrollHeight")
-                          if new_height == last_height:
-                              break
-                          last_height = new_height
+                      print("-> Suche nach 'Mehr laden'-Buttons für die zukünftigen Wochen...")
+                      
+                      # Versuche bis zu 6 Mal, versteckte Seiten aufzuklappen
+                      for click_attempt in range(6):
+                          # Sucht nach gängigen Buttons wie "Mehr laden", "Weitere", "Nächste", "Load more"
+                          load_more = page.locator("button:has-text('laden'), button:has-text('weiter'), a:has-text('weiter'), [class*='loadmore'], [id*='loadmore']").first
+                          
+                          if load_more.is_visible(timeout=2000):
+                              print(f"   [Klick {click_attempt+1}] Button gefunden! Klappe Zukunft auf...")
+                              load_more.click()
+                              page.wait_for_timeout(2000) # Warte auf das Nachladen der Daten
+                          else:
+                              # Falls kein Button sichtbar ist, scrollen wir einmal kurz, um AJAX zu triggern
+                              page.mouse.wheel(0, 2000)
+                              page.wait_for_timeout(1000)
 
                       soup = BeautifulSoup(page.content(), 'html.parser')
                       browser.close()
 
                       raw_lines = soup.get_text(separator="\n").split("\n")
                       lines = [l.strip() for l in raw_lines if l.strip()]
-                      print(f"   {len(lines)} Textzeilen nach Tiefen-Scroll geladen.")
+                      print(f"   {len(lines)} Textzeilen nach Klick- & Expansions-Lauf geladen.")
 
                       date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)|(\d{1,2}\s*(juni|juli|aug|sept|okt))', re.IGNORECASE)
                       day_pattern = re.compile(r'(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|sa\.|so\.)', re.IGNORECASE)
