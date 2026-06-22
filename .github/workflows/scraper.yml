@@ -7,35 +7,27 @@ jobs:
   import:
     runs-on: ubuntu-latest
     steps:
-      - name: Daten importieren und in Supabase speichern
+      - name: Debug API Antwort
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
-          import requests, os
-
-          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=minimal"}
+          import requests
           
-          # API-Abfrage
           api_url = "https://tourismus-bw.de/api/v1/events?region=baden-wuerttemberg"
           response = requests.get(api_url, headers={"User-Agent": "FestFinder-Backend/2.0"})
           
+          print(f"Status Code: {response.status_code}")
+          
+          # Wir drucken den Anfang der Antwort aus, um das Format zu sehen
+          print("Antwort-Inhalt (erste 500 Zeichen):")
+          print(response.text[:500])
+          
           if response.status_code == 200:
-              events = response.json().get("data", [])
-              print(f"Importiere {len(events)} Events...")
-              
-              for event in events:
-                  # Hier mappen wir die Daten aus der API auf deine Spalten
-                  # Achte darauf, dass 'name' und 'datum' genau so in deiner Supabase-Tabelle heißen
-                  payload = {
-                      "name": event.get("title", "Kein Name"),
-                      "datum": event.get("date_start", "2026-01-01")
-                  }
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
-              
-              print("Alle Events erfolgreich in die Datenbank geschrieben!")
-          else:
-              print(f"Fehler beim Import: {response.status_code}")
+              try:
+                  data = response.json()
+                  print("JSON erfolgreich geladen!")
+              except Exception as e:
+                  print(f"Fehler beim Parsen: {e}")
           EOF
