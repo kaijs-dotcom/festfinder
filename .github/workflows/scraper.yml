@@ -7,33 +7,35 @@ jobs:
   import:
     runs-on: ubuntu-latest
     steps:
-      - name: Master-API Abfrage
+      - name: Daten importieren und in Supabase speichern
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
           import requests, os
-          
-          # Wir nutzen einen Header, der sich als API-Client ausgibt (kein Browser-Fake!)
-          headers = {
-              "Authorization": f"Bearer {os.environ.get('SUPABASE_KEY')}",
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-              "User-Agent": "FestFinder-Backend-Service/2.0"
-          }
 
-          # Dies ist ein direkter API-Endpunkt, der oft nicht mit Web-Firewalls gesichert ist
-          # Wir versuchen es über den Open-Data-Kanal
-          api_url = "https://tourismus-bw.de/api/v1/events?region=baden-wuerttemberg"
+          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=minimal"}
           
-          try:
-              response = requests.get(api_url, headers=headers, timeout=15)
-              if response.status_code == 200:
-                  print("Erfolg! Daten empfangen.")
-                  # Hier folgt die Logik für den Supabase-Upload
-              else:
-                  print(f"API-Status: {response.status_code}")
-          except Exception as e:
-              print(f"Fehler: {e}")
+          # API-Abfrage
+          api_url = "https://tourismus-bw.de/api/v1/events?region=baden-wuerttemberg"
+          response = requests.get(api_url, headers={"User-Agent": "FestFinder-Backend/2.0"})
+          
+          if response.status_code == 200:
+              events = response.json().get("data", [])
+              print(f"Importiere {len(events)} Events...")
+              
+              for event in events:
+                  # Hier mappen wir die Daten aus der API auf deine Spalten
+                  # Achte darauf, dass 'name' und 'datum' genau so in deiner Supabase-Tabelle heißen
+                  payload = {
+                      "name": event.get("title", "Kein Name"),
+                      "datum": event.get("date_start", "2026-01-01")
+                  }
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
+              
+              print("Alle Events erfolgreich in die Datenbank geschrieben!")
+          else:
+              print(f"Fehler beim Import: {response.status_code}")
           EOF
