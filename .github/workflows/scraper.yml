@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Direct-API)
+name: Profi Fest-Scraper (Diagnose 2.0)
 
 on:
   workflow_dispatch:
@@ -7,37 +7,34 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: API direkt abfragen
+      - name: API-Diagnose mit SSL-Fix
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - << 'EOF'
-          import os
           import requests
-
-          URL = os.environ.get("SUPABASE_URL")
-          KEY = os.environ.get("SUPABASE_KEY")
-          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+          import urllib3
           
-          # Die URL, die wir im Log gefunden haben
+          # Sicherheitswarnungen für die Diagnose unterdrücken
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+          
           API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter%5BclientIncludingManaged%5D=events&filter%5Bdate%5D%5Bafter%5D=today&filter%5Bdate%5D%5Bbefore%5D=next-15&language=de"
-
-          response = requests.get(API_URL)
-          data = response.json()
-
-          # Wir iterieren durch die Ergebnisse (Toubiz API-Struktur)
-          items = data.get("data", [])
-          for item in items:
-              # Hier ziehen wir die echten Event-Infos
-              attributes = item.get("attributes", {})
-              name = attributes.get("name", "Event")
-              datum = attributes.get("startDate", "Datum n.n.")
+          
+          try:
+              # verify=False umgeht den Zertifikatsfehler
+              response = requests.get(API_URL, verify=False)
+              data = response.json()
               
-              # In Supabase speichern
-              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                  "name": name,
-                  "datum": datum,
-                  "link": "https://remstal.de/events/kalender"
-              })
+              print(f"DEBUG: Status Code: {response.status_code}")
+              print(f"DEBUG: Keys im JSON: {data.keys() if isinstance(data, dict) else 'Nicht dict'}")
+              
+              items = data.get("data", [])
+              print(f"DEBUG: Anzahl gefundener Events: {len(items)}")
+              
+              if len(items) > 0:
+                  print(f"DEBUG: Erstes Event-Beispiel: {items[0]}")
+                  
+          except Exception as e:
+              print(f"DEBUG: Fehler beim API-Abruf: {e}")
           EOF
