@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Diagnose 2.0)
+name: Profi Fest-Scraper (Identitäts-Maskierung)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: API-Diagnose mit SSL-Fix
+      - name: API-Abruf mit Maske
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -15,26 +15,28 @@ jobs:
           python - << 'EOF'
           import requests
           import urllib3
-          
-          # Sicherheitswarnungen für die Diagnose unterdrücken
           urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
           
+          # Die API-URL
           API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter%5BclientIncludingManaged%5D=events&filter%5Bdate%5D%5Bafter%5D=today&filter%5Bdate%5D%5Bbefore%5D=next-15&language=de"
           
+          # Wir tarnen uns als Chrome-Browser auf einem Mac
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+          
           try:
-              # verify=False umgeht den Zertifikatsfehler
-              response = requests.get(API_URL, verify=False)
-              data = response.json()
-              
+              response = requests.get(API_URL, headers=headers, verify=False)
               print(f"DEBUG: Status Code: {response.status_code}")
-              print(f"DEBUG: Keys im JSON: {data.keys() if isinstance(data, dict) else 'Nicht dict'}")
               
-              items = data.get("data", [])
-              print(f"DEBUG: Anzahl gefundener Events: {len(items)}")
-              
-              if len(items) > 0:
-                  print(f"DEBUG: Erstes Event-Beispiel: {items[0]}")
-                  
+              if response.status_code == 200:
+                  data = response.json()
+                  items = data.get("data", [])
+                  print(f"DEBUG: Anzahl Events: {len(items)}")
+                  if len(items) > 0:
+                      print(f"DEBUG: Erstes Item: {items[0]}")
+              else:
+                  print(f"DEBUG: Fehler-Antwort vom Server: {response.text[:200]}")
           except Exception as e:
-              print(f"DEBUG: Fehler beim API-Abruf: {e}")
+              print(f"DEBUG: Fehler: {e}")
           EOF
