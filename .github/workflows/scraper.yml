@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (API-Erzwinger)
+name: Profi Fest-Scraper (Direct-API)
 
 on:
   workflow_dispatch:
@@ -7,18 +7,7 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: Code auschecken
-        uses: actions/checkout@v4
-      - name: Setup & Scrape
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Installieren
-        run: |
-          pip install requests playwright
-          playwright install chromium
-
-      - name: API-Daten abgreifen
+      - name: API direkt abfragen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,24 +15,29 @@ jobs:
           python - << 'EOF'
           import os
           import requests
-          from playwright.sync_api import sync_playwright
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+          
+          # Die URL, die wir im Log gefunden haben
+          API_URL = "https://wein.toubiz.de/api/v1/eventDates?filter%5BclientIncludingManaged%5D=events&filter%5Bdate%5D%5Bafter%5D=today&filter%5Bdate%5D%5Bbefore%5D=next-15&language=de"
 
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              page = browser.new_page()
+          response = requests.get(API_URL)
+          data = response.json()
+
+          # Wir iterieren durch die Ergebnisse (Toubiz API-Struktur)
+          items = data.get("data", [])
+          for item in items:
+              # Hier ziehen wir die echten Event-Infos
+              attributes = item.get("attributes", {})
+              name = attributes.get("name", "Event")
+              datum = attributes.get("startDate", "Datum n.n.")
               
-              # Wir loggen die Requests, um die URL zu finden
-              def get_requests(route, request):
-                  if "events" in request.url:
-                      print(f"GEFUNDENE API-URL: {request.url}")
-                  route.continue_()
-              
-              page.route("**/*", get_requests)
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
-              page.wait_for_timeout(10000)
-              browser.close()
+              # In Supabase speichern
+              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                  "name": name,
+                  "datum": datum,
+                  "link": "https://remstal.de/events/kalender"
+              })
           EOF
