@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Passiver Lauscher)
+name: Profi Fest-Scraper (API-Erzwinger)
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
           pip install requests playwright
           playwright install chromium
 
-      - name: Passiver Lauscher
+      - name: API-Daten abgreifen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -36,24 +36,14 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               
-              # Hier sammeln wir Daten, sobald sie das Netzwerk passieren
-              def handle_response(response):
-                  if "events" in response.url and "json" in response.headers.get("content-type", ""):
-                      try:
-                          data = response.json()
-                          # Versuchen wir, das JSON-Paket direkt zu zerlegen
-                          # Wenn es eine Liste ist, nehmen wir sie direkt
-                          items = data if isinstance(data, list) else data.get("items", [])
-                          for item in items:
-                              name = item.get("title", "Event")
-                              datum = item.get("start_date", "Datum n.n.")
-                              link = "https://remstal.de" + item.get("url", "")
-                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "datum": datum, "link": link})
-                      except: pass
+              # Wir loggen die Requests, um die URL zu finden
+              def get_requests(route, request):
+                  if "events" in request.url:
+                      print(f"GEFUNDENE API-URL: {request.url}")
+                  route.continue_()
               
-              page.on("response", handle_response)
-              # Wir laden einfach die Seite und warten, das Skript der Seite erledigt den Rest
+              page.route("**/*", get_requests)
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
-              page.wait_for_timeout(10000) # 10 Sekunden Zeit für den Hintergrund-Prozess
+              page.wait_for_timeout(10000)
               browser.close()
           EOF
