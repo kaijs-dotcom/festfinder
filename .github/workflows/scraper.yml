@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Geduldiger Jäger)
+name: Profi Fest-Scraper (Rohe-Gewalt-Modus)
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Jäger ausführen
+      - name: Rohe Gewalt ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -28,7 +28,6 @@ jobs:
           import requests
           from playwright.sync_api import sync_playwright
           from bs4 import BeautifulSoup
-          import time
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
@@ -38,32 +37,26 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
+              page.wait_for_timeout(5000)
               
-              # Cookie-Banner
-              try: page.locator("button[data-testid='uc-accept-all-button']").click()
-              except: pass
-              
-              # Jetzt wird gejagt: Wir scrollen 5x nach unten
-              for i in range(5):
-                  page.mouse.wheel(0, 1000)
-                  time.sleep(2) # Warten, damit der Kalender die nächsten Einträge lädt
-              
+              # KEINE Selektoren, einfach alles was 'a' ist
               soup = BeautifulSoup(page.content(), 'html.parser')
-              # Wir suchen jetzt nach den echten Kalender-Karten, die meist 'a' mit 'event' sind
-              events = soup.select('a[class*="event"], a[class*="teaser"]')
+              all_links = soup.find_all('a')
               
-              print(f"Gefundene Kandidaten nach Scrollen: {len(events)}")
-              
-              for ev in events:
-                  title = ev.get_text(" ", strip=True)
-                  link = "https://remstal.de" + ev['href'] if ev['href'].startswith('/') else ev['href']
-                  
-                  if len(title) > 5:
+              count = 0
+              for a in all_links:
+                  link = a.get('href', '')
+                  text = a.get_text(" ", strip=True)
+                  # Wenn der Link "/events/" enthält, ist es wahrscheinlich ein Event
+                  if "/events/" in link and len(text) > 10:
+                      full_url = f"https://remstal.de{link}" if link.startswith('/') else link
                       requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": title,
+                          "name": text[:50],
                           "veranstalter": "Remstal Tourismus",
                           "datum": "Gefunden",
-                          "link": link
+                          "link": full_url
                       })
+                      count += 1
+              print(f"-> {count} Links als Events gespeichert.")
               browser.close()
           EOF
