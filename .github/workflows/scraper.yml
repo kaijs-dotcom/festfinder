@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Smart Radar & Live Keywords)
+name: Profi Fest-Scraper (Container-Radar)
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Live Keywords & Smart Radar ausführen
+      - name: Container-Radar ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -32,129 +32,56 @@ jobs:
           import requests
           from bs4 import BeautifulSoup
           from playwright.sync_api import sync_playwright
-          import re
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
-          headers = {
-              "apikey": KEY,
-              "Authorization": f"Bearer {KEY}",
-              "Content-Type": "application/json",
-              "Prefer": "return=minimal"
-          }
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
-          # 1. Live-Suchwörter laden
-          fallback_keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest"]
-          keywords = []
-          try:
-              sw_res = requests.get(f"{URL}/rest/v1/suchworte", headers=headers)
-              if sw_res.ok and sw_res.json():
-                  keywords = [row['wort'].lower().strip() for row in sw_res.json() if 'wort' in row and row.get('wort')]
-              if not keywords:
-                  keywords = fallback_keywords
-          except Exception:
-              keywords = fallback_keywords
+          keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest", "weindorf", "besen"]
 
-          # 2. Quellen abrufen
           try:
               res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
               quellen = res.json()
-          except Exception:
-              quellen = []
+          except: quellen = []
 
           for q in quellen:
-              print(f"--- Starte Smart-Radar für: {q['beschreibung']} ---")
-              found_events = []
-
+              print(f"--- Starte Container-Radar für: {q['beschreibung']} ---")
               try:
                   with sync_playwright() as p:
                       browser = p.chromium.launch(headless=True)
                       page = browser.new_page()
-                      page.set_viewport_size({"width": 1280, "height": 1000})
-                      page.goto(q['url'], wait_until="networkidle", timeout=45000)
-                      page.wait_for_timeout(2000)
+                      page.goto(q['url'], wait_until="networkidle", timeout=60000)
+                      page.wait_for_timeout(3000)
 
-                      # Cookie-Banner entfernen
-                      try:
-                          accept_button = page.locator("id=usercentrics-root >> button[data-testid='uc-accept-all-button']")
-                          if accept_button.is_visible(timeout=3000):
-                              accept_button.click()
-                              page.wait_for_timeout(1000)
-                      except Exception:
-                          pass
+                      # Cookie weg
+                      try: page.locator("button[data-testid='uc-accept-all-button']").click()
+                      except: pass
 
-                      print("-> Suche nach 'Mehr laden'-Buttons für die zukünftigen Wochen...")
+                      # Wir suchen jetzt spezifisch nach HTML-Elementen, die wie Event-Karten aussehen
+                      # Viele Portale nutzen 'article', 'li' oder spezielle 'event'-Klassen
+                      events = page.query_selector_all("article, .event, .calendar-item, li")
                       
-                      # Versuche bis zu 6 Mal, versteckte Seiten aufzuklappen
-                      for click_attempt in range(6):
-                          # Sucht nach gängigen Buttons wie "Mehr laden", "Weitere", "Nächste", "Load more"
-                          load_more = page.locator("button:has-text('laden'), button:has-text('weiter'), a:has-text('weiter'), [class*='loadmore'], [id*='loadmore']").first
-                          
-                          if load_more.is_visible(timeout=2000):
-                              print(f"   [Klick {click_attempt+1}] Button gefunden! Klappe Zukunft auf...")
-                              load_more.click()
-                              page.wait_for_timeout(2000) # Warte auf das Nachladen der Daten
-                          else:
-                              # Falls kein Button sichtbar ist, scrollen wir einmal kurz, um AJAX zu triggern
-                              page.mouse.wheel(0, 2000)
-                              page.wait_for_timeout(1000)
-
-                      soup = BeautifulSoup(page.content(), 'html.parser')
+                      print(f"-> {len(events)} potenzielle Event-Container gefunden.")
+                      
+                      found_count = 0
+                      for ev in events:
+                          text = ev.inner_text().lower()
+                          # Prüfe, ob Keyword UND Datum enthalten sind
+                          if any(k in text for k in keywords) and any(d in text for d in ["2026", ".", "juni", "juli"]):
+                              title = ev.inner_text().split('\n')[0]
+                              if len(title) > 5 and len(title) < 100:
+                                  print(f"-> Treffer: {title}")
+                                  # Speichern
+                                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                                      "name": title,
+                                      "veranstalter": q['beschreibung'],
+                                      "datum": "siehe Website",
+                                      "link": q['url']
+                                  })
+                                  found_count += 1
+                      
                       browser.close()
-
-                      raw_lines = soup.get_text(separator="\n").split("\n")
-                      lines = [l.strip() for l in raw_lines if l.strip()]
-                      print(f"   {len(lines)} Textzeilen nach Klick- & Expansions-Lauf geladen.")
-
-                      date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)|(\d{1,2}\s*(juni|juli|aug|sept|okt))', re.IGNORECASE)
-                      day_pattern = re.compile(r'(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|sa\.|so\.)', re.IGNORECASE)
-
-                      for i, line in enumerate(lines):
-                          if any(k in line.lower() for k in keywords):
-                              if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter", "öffnungszeiten", "kontakt"]):
-                                  continue
-                              
-                              start_idx = max(0, i - 2)
-                              end_idx = min(len(lines), i + 3)
-                              context_chunk = lines[start_idx:end_idx]
-                              
-                              has_date = False
-                              date_text = "Siehe Website"
-                              
-                              for chunk in context_chunk:
-                                  if date_pattern.search(chunk) or day_pattern.search(chunk):
-                                      has_date = True
-                                      if len(chunk) < 15 and (date_pattern.search(chunk) or day_pattern.search(chunk)):
-                                          date_text = chunk
-                                      else:
-                                          date_text = chunk[:30]
-
-                              if has_date and 8 < len(line) < 95:
-                                  if line not in [e["title"] for e in found_events]:
-                                      found_events.append({
-                                          "title": line,
-                                          "date": date_text
-                                      })
-
-              except Exception as err:
-                  print("Fehler im Smart-Radar:", err)
-
-              # 3. Speichern in Supabase
-              saved_count = 0
-              for ev in found_events[:40]:
-                  name = ev["title"]
-                  datum = ev["date"]
-                  
-                  check = requests.get(f"{URL}/rest/v1/feste?name=eq.{name}", headers=headers)
-                  if check.ok and len(check.json()) == 0:
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": name,
-                          "veranstalter": q['beschreibung'],
-                          "datum": datum,
-                          "entfernung": "Region",
-                          "link": q['url']
-                      })
-                      saved_count += 1
-              
-              print(f"-> {len(found_events)} echte Termine isoliert. {saved_count} neu gespeichert.")
+                      print(f"-> {found_count} Events gespeichert.")
+              except Exception as e:
+                  print("Fehler:", e)
           EOF
