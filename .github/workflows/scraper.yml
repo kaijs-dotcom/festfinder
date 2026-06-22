@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Deep-Crawler)
+name: Profi Fest-Scraper (Event-Scharfschütze)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
-      - name: Python einrichten
+      - name: Setup & Scrape
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -18,7 +18,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Deep-Crawler ausführen
+      - name: Event-Scharfschütze ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,8 +26,8 @@ jobs:
           python - << 'EOF'
           import os
           import requests
-          from bs4 import BeautifulSoup
           from playwright.sync_api import sync_playwright
+          from bs4 import BeautifulSoup
 
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
@@ -37,33 +37,23 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
+              page.wait_for_timeout(5000) # Warten, bis der Kalender lädt
               
+              # Suche nach Elementen, die 'event' oder 'date' im Namen haben
               soup = BeautifulSoup(page.content(), 'html.parser')
-              # Sammle nur sinnvolle Links ein
-              links = [a['href'] for a in soup.select('a[href*="/events/"]') if a.get('href')]
+              elements = soup.select("[class*='event'], [class*='calendar-item'], .teaser")
               
-              # Vermeide Duplikate und gehe nur auf Unterseiten
-              unique_links = list(set([l for l in links if l.count('/') > 2]))
-
-              for link in unique_links[:5]:
-                  full_url = f"https://remstal.de{link}" if link.startswith('/') else link
-                  try:
-                      page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
-                      sub_soup = BeautifulSoup(page.content(), 'html.parser')
-                      
-                      # Suche nach Event-Containern (allgemein gehalten)
-                      events = sub_soup.select('article, .event, .entry')
-                      
-                      for ev in events:
-                          title = ev.get_text(" ", strip=True).split('\n')[0][:80]
-                          if len(title) > 5:
-                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                                  "name": title,
-                                  "veranstalter": "Remstal Tourismus",
-                                  "datum": "siehe Link",
-                                  "link": full_url
-                              })
-                  except Exception as e:
-                      print(f"Fehler bei {full_url}: {e}")
+              print(f"Gefundene Kandidaten: {len(elements)}")
+              
+              for el in elements:
+                  text = el.get_text(" ", strip=True)
+                  # Wir filtern nach 'Datum'-ähnlichen Strukturen (z.B. 22.06. oder ähnliches)
+                  if len(text) > 20 and any(char.isdigit() for char in text):
+                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                          "name": text[:50],
+                          "veranstalter": "Remstal Tourismus",
+                          "datum": "Gefunden",
+                          "link": "https://remstal.de/events/kalender"
+                      })
               browser.close()
           EOF
