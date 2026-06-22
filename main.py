@@ -1,12 +1,12 @@
 import os
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 
 def run_import():
     URL = os.environ.get("SUPABASE_URL")
     KEY = os.environ.get("SUPABASE_KEY")
     
-    # Das ist der Header für das Upsert
     headers = {
         "apikey": KEY,
         "Authorization": f"Bearer {KEY}",
@@ -23,9 +23,15 @@ def run_import():
         h3 = event.find("h3")
         if h3:
             name = h3.get_text(strip=True)
-            payload = {"name": name, "veranstalter": "Schwarzwald Tourismus"}
+            # HIER: Falls du das Datum aus einem HTML-Tag lesen kannst, ersetze es hier:
+            # datum = event.find("span", class_="dein-datum-tag").text 
+            datum = datetime.now().strftime("%Y-%m-%d") # Platzhalter-Datum
             
-            # Upsert Befehl (statt DELETE + POST)
+            payload = {
+                "name": name, 
+                "veranstalter": "Schwarzwald Tourismus",
+                "datum": datum
+            }
             requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
 
 if __name__ == "__main__":
