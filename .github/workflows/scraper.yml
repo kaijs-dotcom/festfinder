@@ -1,59 +1,41 @@
 import os
 import requests
-import re
 from bs4 import BeautifulSoup
 
-def run_crawler():
-    # 1. Konfiguration aus Umgebungsvariablen
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-    target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
-
+def run_import():
+    # URL & KEY aus Umgebungsvariablen (so wie es bei dir lief)
+    URL = os.environ.get("SUPABASE_URL")
+    KEY = os.environ.get("SUPABASE_KEY")
+    
+    # Bewährte Header mit Upsert-Zusatz
     headers = {
-        "apikey": supabase_key,
-        "Authorization": f"Bearer {supabase_key}",
+        "apikey": KEY,
+        "Authorization": f"Bearer {KEY}",
         "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates" 
+        "Prefer": "resolution=merge-duplicates"
     }
 
-    # 2. Seite laden
-    response = requests.get(target_url, headers={"User-Agent": "Mozilla/5.0"})
+    # 1. Daten holen
+    response = requests.get("https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen")
+    soup = BeautifulSoup(response.content, "html.parser")
     
-    if response.status_code != 200:
-        print(f"Seite nicht erreichbar: {response.status_code}")
-        return
-
-    soup = BeautifulSoup(response.content, 'lxml')
-    events = soup.find_all('div', class_='c-headline__icon-wrapper')
+    # Dein bewährter Selektor
+    events = soup.find_all("div", class_="c-headline__icon-wrapper")
     
-    if not events:
-        print("Keine Events gefunden.")
-        return
-
-    print(f"Gefundene Elemente: {len(events)}")
-
-    # 3. Daten verarbeiten und senden
-    for e in events:
-        h3_tag = e.find('h3')
-        if not h3_tag:
-            continue
+    for event in events:
+        # Extraktion
+        h3 = event.find("h3")
+        if h3:
+            name = h3.get_text(strip=True)
             
-        raw_name = h3_tag.get_text(strip=True)
-        # Duplikat-Filter
-        clean_name = re.sub(r'(.+?)\1', r'\1', raw_name)
-        
-        payload = {
-            "name": clean_name,
-            "veranstalter": "Schwarzwald Tourismus"
-        }
-
-        # 4. Upsert (Supabase aktualisiert automatisch, wenn name existiert)
-        resp = requests.post(f"{supabase_url}/rest/v1/feste", headers=headers, json=payload)
-
-        if resp.status_code in [200, 201]:
-            print(f"Erfolg: {clean_name}")
-        else:
-            print(f"Fehler bei {clean_name}: {resp.status_code} - {resp.text}")
+            # 2. Daten senden (OHNE DELETE, einfach nur POST)
+            payload = {"name": name, "veranstalter": "Schwarzwald Tourismus"}
+            response = requests.post(f"{URL}/rest/v1/feste", headers=headers, json=payload)
+            
+            if response.status_code in [200, 201]:
+                print(f"Erfolg: {name}")
+            else:
+                print(f"Fehler bei {name}: {response.text}")
 
 if __name__ == "__main__":
-    run_crawler()
+    run_import()
