@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (API-Extraktor)
+name: Profi Fest-Scraper (Fix & API)
 
 on:
   workflow_dispatch:
@@ -35,33 +35,36 @@ jobs:
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
+              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
               
-              # Wir sammeln alle Events in einer Liste
-              events_found = []
+              # 1. Cookie-Banner mit roher Gewalt schließen
+              page.wait_for_timeout(3000)
+              try:
+                  page.evaluate("document.querySelector('#usercentrics-root')?.shadowRoot?.querySelector('button[data-testid=\"uc-accept-all-button\"]')?.click()")
+                  page.wait_for_timeout(2000)
+              except: pass
 
+              # 2. Liste klicken - diesmal mit JS-Klick, falls das Element "unter" dem Banner liegt
+              try:
+                  page.evaluate("document.evaluate(\"//span[text()='Liste']\", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.click()")
+                  page.wait_for_timeout(5000)
+              except Exception as e:
+                  print(f"Klick-Fehler ignoriert: {e}")
+
+              # 3. Daten abgreifen
               def handle_response(response):
                   if "events" in response.url and "json" in response.headers.get("content-type", ""):
                       try:
                           data = response.json()
-                          # Oft ist das JSON eine Liste oder enthält ein "items" Feld
                           items = data if isinstance(data, list) else data.get("items", [])
                           for item in items:
-                              name = item.get("title", item.get("name", "Unbekannt"))
-                              datum = item.get("date", item.get("start_date", "TBA"))
+                              name = item.get("title", "Event")
+                              datum = item.get("start_date", "Datum unbekannt")
                               link = "https://remstal.de" + item.get("url", "")
-                              
-                              # In DB speichern
-                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                                  "name": name,
-                                  "veranstalter": "Remstal Tourismus",
-                                  "datum": datum,
-                                  "link": link
-                              })
+                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "datum": datum, "link": link})
                       except: pass
               
               page.on("response", handle_response)
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle")
-              page.get_by_text("Liste").first.click()
               page.wait_for_timeout(5000)
               browser.close()
           EOF
