@@ -1,4 +1,4 @@
-name: Universeller Fest-Scraper (Playwright)
+name: Profi Fest-Scraper (API & Playwright)
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Quellen mit virtuellem Browser analysieren
+      - name: Quellen intelligent auslesen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -34,7 +34,6 @@ jobs:
           from playwright.sync_api import sync_playwright
           import re
 
-          # Zugangsdaten laden
           URL = os.environ.get("SUPABASE_URL")
           KEY = os.environ.get("SUPABASE_KEY")
           headers = {
@@ -44,83 +43,100 @@ jobs:
               "Prefer": "return=minimal"
           }
 
-          # 1. Aktive Quellen auslesen
+          # 1. Quellen laden
           try:
               res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
               quellen = res.json()
           except Exception as e:
-              print("Fehler beim Laden der Quellen:", e)
+              print("Fehler beim Laden:", e)
               quellen = []
 
-          # 2. Virtuellen Browser starten
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              page = browser.new_page()
+          for q in quellen:
+              print(f"Scrape Quelle: {q['beschreibung']}")
+              found_events = []
 
-              for q in quellen:
-                  print(f"Scrape Quelle: {q['beschreibung']} ({q['url']})")
+              # SPEZIALFALL: Remstal-Kalender über direkte API-Schnittstelle knacken
+              if "remstal.de" in q['url']:
                   try:
-                      # Webseite aufrufen und warten, bis das Netzwerk zur Ruhe kommt (für dynamische Inhalte)
-                      page.goto(q['url'], wait_until="networkidle", timeout=30000)
+                      print("-> Nutze direkten API-Zugriff für Remstal...")
+                      # Wir steuern direkt die JSON-Schnittstelle von Remstal an
+                      api_url = "https://www.remstal.de/index.php?id=2270&type=1567584102&tx_itcevents_calendar%5Baction%5D=ajaxList&tx_itcevents_calendar%5Bcontroller%5D=Event"
+                      # Wir simulieren den Filter für kommende Events
+                      form_data = {
+                          'tx_itcevents_calendar[search][mainCategory]': '',
+                          'tx_itcevents_calendar[search][dateStart]': '22.06.2026'
+                      }
+                      api_res = requests.post(api_url, data=form_data, timeout=15)
                       
-                      # Den vollständig gerenderten HTML-Inhalt holen
-                      html_content = page.content()
-                      soup = BeautifulSoup(html_content, 'html.parser')
-                      
-                      # Text der Seite für eine erste Analyse holen
-                      page_text = soup.get_text()
-                      
-                      # Ein etwas schlauerer Extraktions-Versuch für Events:
-                      # Wir suchen nach typischen Mustern (z.B. Zeilen, die ein Datum enthalten)
-                      lines = [line.strip() for line in page_text.split('\n') if line.strip()]
-                      
-                      found_events = []
-                      
-                      # Einfacher Regex für deutsche Datumsformate (z.B. 22.06.2026 oder 22. Juni)
-                      date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.|\d{1,2}\.\s?(?:Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez))')
-
-                      for i, line in enumerate(lines):
-                          if date_pattern.search(line):
-                              # Wenn wir ein Datum finden, nehmen wir an, dass der Kontext (vorherige/nächste Zeile) das Event beschreibt
-                              context_lines = lines[max(0, i-1):min(len(lines), i+3)]
-                              event_candidate = " | ".join(context_lines)
-                              
-                              # Ein paar Filter, um Müll zu vermeiden
-                              if any(keyword in event_candidate.lower() for keyword in ["fest", "hocketse", "markt", "feier", "festival", "hocketes", "hock"]):
-                                  if len(event_candidate) < 200: # Schutz vor Riesen-Textblöcken
-                                      found_events.append({
-                                          "raw": event_candidate,
-                                          "date": line
-                                      })
-
-                      # Wenn der schlaue Filter nichts findet, aber die Seite generell relevant klingt (Fallbacks für Vereine)
-                      if not found_events and any(x in page_text.lower() for x in ["fest", "hocketse", "termine"]):
-                          found_events.append({
-                              "raw": f"Veranstaltung / Fest bei {q['beschreibung']}",
-                              "date": "Siehe Webseite"
-                          })
-
-                      # Duplikate filtern und in Datenbank speichern
-                      saved_count = 0
-                      for ev in found_events[:10]: # Maximal 10 Events pro Quelle für den Anfang
-                          neues_fest = {
-                              "name": ev["raw"][:80], # Auf 80 Zeichen kürzen für die Optik
-                              "veranstalter": q['beschreibung'],
-                              "datum": ev["date"][:30],
-                              "entfernung": "Region",
-                              "link": q['url']
-                          }
+                      # Wenn wir strukturierte Daten bekommen, extrahieren wir die echten Feste
+                      if api_res.ok:
+                          soup = BeautifulSoup(api_res.text, 'html.parser')
+                          # Suche nach den Event-Einträgen im gelieferten HTML-Fragment
+                          items = soup.find_all(class_="article-event") or soup.find_all('div', class_=re.compile(r'event'))
                           
-                          # Prüfen, ob exakt dieses Fest schon existiert
-                          check = requests.get(f"{URL}/rest/v1/feste?name=eq.{neues_fest['name']}", headers=headers)
-                          if len(check.json()) == 0:
-                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json=neues_fest)
-                              saved_count += 1
-                      
-                      print(f"-> {saved_count} neue(s) Fest(e) aus dieser Quelle extrahiert.")
+                          for item in items:
+                              title_el = item.find(class_="headline") or item.find('h3') or item.find('h4')
+                              date_el = item.find(class_="date") or item.find(class_="time")
+                              
+                              if title_el:
+                                  title_text = title_el.get_text().strip()
+                                  date_text = date_el.get_text().strip() if date_el else "Demnächst"
+                                  
+                                  # Filter nach Festen/Hocketsern
+                                  if any(k in title_text.lower() for k in ["fest", "hocketse", "markt", "hock", "festival", "weindorf"]):
+                                      found_events.append({
+                                          "title": title_text,
+                                          "date": date_text
+                                      })
+                  except Exception as api_err:
+                      print("API-Schnittstelle fehlgeschlagen, wechsle zu Browser...", api_err)
 
-                  except Exception as e:
-                      print(f"Fehler bei Quelle {q['url']}: {e}")
-                      
-              browser.close()
+              # UNIVERSALFALL: Playwright-Browser für klassische Webseiten/Vereine
+              if not found_events:
+                  try:
+                      with sync_playwright() as p:
+                          browser = p.chromium.launch(headless=True)
+                          page = browser.new_page()
+                          page.goto(q['url'], wait_until="networkidle", timeout=30000)
+                          
+                          # Eventuelle Cookie-Banner wegdrehen, indem wir nur den echten Content-Bereich auslesen
+                          html = page.content()
+                          soup = BeautifulSoup(html, 'html.parser')
+                          
+                          # Suche nach Datumszeilen im Text
+                          lines = [l.strip() for l in soup.get_text().split('\n') if l.strip()]
+                          date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)')
+                          
+                          for i, line in enumerate(lines):
+                              if date_pattern.search(line):
+                                  context = " | ".join(lines[max(0, i-1):min(len(lines), i+2)])
+                                  if any(k in context.lower() for k in ["fest", "hocketse", "hauptversammlung", "termine", "hock"]):
+                                      if len(context) < 150:
+                                          found_events.append({
+                                              "title": context,
+                                              "date": line
+                                          })
+                          browser.close()
+                  except Exception as browser_err:
+                      print("Browser-Scrape fehlgeschlagen:", browser_err)
+
+              # 3. Ergebnisse speichern
+              saved_count = 0
+              for ev in found_events[:15]:  # Die besten 15 Funde eintragen
+                  name = ev.get("title", "Fest")[:80]
+                  datum = ev.get("date", "Siehe Website")[:30]
+                  
+                  # Duplikat-Check
+                  check = requests.get(f"{URL}/rest/v1/feste?name=eq.{name}", headers=headers)
+                  if check.ok and len(check.json()) == 0:
+                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                          "name": name,
+                          "veranstalter": q['beschreibung'],
+                          "datum": datum,
+                          "entfernung": "Remstal / Region",
+                          "link": q['url']
+                      })
+                      saved_count += 1
+              
+              print(f"-> Erfolgreich {saved_count} echte Feste gespeichert.")
           EOF
