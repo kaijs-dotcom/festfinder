@@ -1,10 +1,9 @@
-name: Automatischer Fest-Scraper
+name: Universeller Fest-Scraper (Playwright)
 
 on:
   schedule:
-    # Läuft jede Nacht um 3:00 Uhr UTC (ca. 4:00/5:00 Uhr deutscher Zeit)
     - cron: '0 3 * * *'
-  workflow_dispatch: # Ermöglicht es uns, den Suchlauf manuell zu testen
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -20,9 +19,10 @@ jobs:
 
       - name: Abhängigkeiten installieren
         run: |
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 playwright
+          playwright install chromium
 
-      - name: Quellen analysieren und Feste finden
+      - name: Quellen mit virtuellem Browser analysieren
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -31,7 +31,8 @@ jobs:
           import os
           import requests
           from bs4 import BeautifulSoup
-          import json
+          from playwright.sync_api import sync_playwright
+          import re
 
           # Zugangsdaten laden
           URL = os.environ.get("SUPABASE_URL")
@@ -43,7 +44,7 @@ jobs:
               "Prefer": "return=minimal"
           }
 
-          # 1. Aktive Quellen aus Backoffice auslesen
+          # 1. Aktive Quellen auslesen
           try:
               res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
               quellen = res.json()
@@ -51,35 +52,75 @@ jobs:
               print("Fehler beim Laden der Quellen:", e)
               quellen = []
 
-          # 2. Schleife durch alle deine URLs
-          for q in quellen:
-              print(f"Scrape Quelle: {q['beschreibung']} ({q['url']})")
-              try:
-                  # Webseite abrufen
-                  page = requests.get(q['url'], timeout=15)
-                  soup = BeautifulSoup(page.text, 'html.parser')
-                  
-                  # Hier simuliert der Agent die Extraktion. 
-                  # (Für eine echte KI-Volltextanalyse binden wir im nächsten Schritt eine kostenlose KI-API ein)
-                  # Testweise erstellen wir ein gefundenes Fest, wenn auf der Seite das Wort "Fest" oder "Hocketse" steht.
-                  webseiten_text = soup.get_text().lower()
-                  
-                  if "fest" in webseiten_text or "hocketse" in webseiten_text or "veranstaltung" in webseiten_text:
-                      # Ein neues Fest vorbereiten
-                      neues_fest = {
-                          "name": f"Event auf {q['beschreibung']}",
-                          "veranstalter": q['beschreibung'],
-                          "datum": "Siehe Webseite",
-                          "entfernung": "Region Nürtingen",
-                          "link": q['url']
-                      }
+          # 2. Virtuellen Browser starten
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+
+              for q in quellen:
+                  print(f"Scrape Quelle: {q['beschreibung']} ({q['url']})")
+                  try:
+                      # Webseite aufrufen und warten, bis das Netzwerk zur Ruhe kommt (für dynamische Inhalte)
+                      page.goto(q['url'], wait_until="networkidle", timeout=30000)
                       
-                      # Prüfen, ob dieses Fest schon existiert
-                      check = requests.get(f"{URL}/rest/v1/feste?name=eq.{neues_fest['name']}", headers=headers)
-                      if len(check.json()) == 0:
-                          # In Datenbank speichern
-                          requests.post(f"{URL}/rest/v1/feste", headers=headers, json=neues_fest)
-                          print(f"-> Neues Fest erfolgreich gespeichert: {neues_fest['name']}")
-              except Exception as e:
-                  print(f"Fehler bei Quelle {q['url']}: {e}")
+                      # Den vollständig gerenderten HTML-Inhalt holen
+                      html_content = page.content()
+                      soup = BeautifulSoup(html_content, 'html.parser')
+                      
+                      # Text der Seite für eine erste Analyse holen
+                      page_text = soup.get_text()
+                      
+                      # Ein etwas schlauerer Extraktions-Versuch für Events:
+                      # Wir suchen nach typischen Mustern (z.B. Zeilen, die ein Datum enthalten)
+                      lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+                      
+                      found_events = []
+                      
+                      # Einfacher Regex für deutsche Datumsformate (z.B. 22.06.2026 oder 22. Juni)
+                      date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.|\d{1,2}\.\s?(?:Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez))')
+
+                      for i, line in enumerate(lines):
+                          if date_pattern.search(line):
+                              # Wenn wir ein Datum finden, nehmen wir an, dass der Kontext (vorherige/nächste Zeile) das Event beschreibt
+                              context_lines = lines[max(0, i-1):min(len(lines), i+3)]
+                              event_candidate = " | ".join(context_lines)
+                              
+                              # Ein paar Filter, um Müll zu vermeiden
+                              if any(keyword in event_candidate.lower() for keyword in ["fest", "hocketse", "markt", "feier", "festival", "hocketes", "hock"]):
+                                  if len(event_candidate) < 200: # Schutz vor Riesen-Textblöcken
+                                      found_events.append({
+                                          "raw": event_candidate,
+                                          "date": line
+                                      })
+
+                      # Wenn der schlaue Filter nichts findet, aber die Seite generell relevant klingt (Fallbacks für Vereine)
+                      if not found_events and any(x in page_text.lower() for x in ["fest", "hocketse", "termine"]):
+                          found_events.append({
+                              "raw": f"Veranstaltung / Fest bei {q['beschreibung']}",
+                              "date": "Siehe Webseite"
+                          })
+
+                      # Duplikate filtern und in Datenbank speichern
+                      saved_count = 0
+                      for ev in found_events[:10]: # Maximal 10 Events pro Quelle für den Anfang
+                          neues_fest = {
+                              "name": ev["raw"][:80], # Auf 80 Zeichen kürzen für die Optik
+                              "veranstalter": q['beschreibung'],
+                              "datum": ev["date"][:30],
+                              "entfernung": "Region",
+                              "link": q['url']
+                          }
+                          
+                          # Prüfen, ob exakt dieses Fest schon existiert
+                          check = requests.get(f"{URL}/rest/v1/feste?name=eq.{neues_fest['name']}", headers=headers)
+                          if len(check.json()) == 0:
+                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json=neues_fest)
+                              saved_count += 1
+                      
+                      print(f"-> {saved_count} neue(s) Fest(e) aus dieser Quelle extrahiert.")
+
+                  except Exception as e:
+                      print(f"Fehler bei Quelle {q['url']}: {e}")
+                      
+              browser.close()
           EOF
