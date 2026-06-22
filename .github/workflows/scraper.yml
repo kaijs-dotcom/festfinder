@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Finaler Event-Extraktor)
+name: Profi Fest-Scraper (Deep-Link Extraktor)
 
 on:
   schedule:
@@ -20,7 +20,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Event-Extraktion starten
+      - name: Deep-Link-Extraktion starten
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -35,7 +35,6 @@ jobs:
           KEY = os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
-          # Suchbegriffe
           keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest", "weindorf", "besen", "ausschank"]
 
           with sync_playwright() as p:
@@ -43,36 +42,33 @@ jobs:
               page = browser.new_page()
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
               
-              # Cookie-Banner weg
               try: page.locator("button[data-testid='uc-accept-all-button']").click()
               except: pass
               
               page.wait_for_timeout(3000)
-
-              # Wir suchen jetzt nach den Event-Blöcken. 
-              # Da Remstal oft 'article' oder Container in Listen verwendet:
-              content = page.content()
-              soup = BeautifulSoup(content, 'html.parser')
+              soup = BeautifulSoup(page.content(), 'html.parser')
               
-              # Wir suchen alle Container, die Event-Infos halten könnten
-              # Meist sind das Elemente mit Klassen wie 'teaser', 'event' oder 'item'
-              items = soup.select("article, .event-teaser, .list-item, li")
-              print(f"-> {len(items)} Elemente in der Liste analysiert.")
-
-              for item in items:
-                  text = item.get_text(" ", strip=True).lower()
-                  # Filter: Enthält es ein Keyword?
-                  if any(k in text for k in keywords):
-                      # Wir extrahieren die erste Zeile als Titel
-                      title = item.get_text(" ", strip=True).split('.')[0][:80]
-                      print(f"-> Treffer: {title}")
+              # Jetzt suchen wir gezielt nach Links in den Event-Teasern
+              links = soup.find_all('a', href=True)
+              
+              found_count = 0
+              for a in links:
+                  text = a.get_text(" ", strip=True).lower()
+                  if any(k in text for k in keywords) and "/events/" in a['href']:
+                      full_link = f"https://remstal.de{a['href']}" if a['href'].startswith('/') else a['href']
+                      title = a.get_text(" ", strip=True).split('.')[0][:80]
+                      
+                      print(f"-> Treffer: {title} | Link: {full_link}")
                       
                       # Ab in die Datenbank
                       requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
                           "name": title,
                           "veranstalter": "Remstal Tourismus",
-                          "datum": "n.n.",
-                          "link": "https://remstal.de/events/kalender"
+                          "datum": "siehe Link",
+                          "link": full_link
                       })
+                      found_count += 1
+              
+              print(f"-> Insgesamt {found_count} Deep-Links zu Events erfolgreich in die DB geladen.")
               browser.close()
           EOF
