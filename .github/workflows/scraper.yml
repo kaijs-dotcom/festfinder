@@ -36,69 +36,34 @@ jobs:
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              
-              # 1. Hauptseite besuchen
               page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
               
-              # Wir sammeln alle Event-Kategorie-Links
               soup = BeautifulSoup(page.content(), 'html.parser')
-              links = [a['href'] for a in soup.select('a[href*="/events/"]')]
-              links = list(set([l for l in links if l.count('/') > 2])) # Nur Unterseiten
+              # Sammle nur sinnvolle Links ein
+              links = [a['href'] for a in soup.select('a[href*="/events/"]') if a.get('href')]
+              
+              # Vermeide Duplikate und gehe nur auf Unterseiten
+              unique_links = list(set([l for l in links if l.count('/') > 2]))
 
-              for link in links[:5]: # Wir nehmen die ersten 5 Kategorien
+              for link in unique_links[:5]:
                   full_url = f"https://remstal.de{link}" if link.startswith('/') else link
-                  page.goto(full_url, wait_until="networkidle")
-                  
-                  # Wir suchen auf der Unterseite nach konkreten Event-Blöcken
-                  # Meistens sind das Klassen wie 'event-item' oder 'calendar-entry'
-                  sub_soup = BeautifulSoup(page.content(), 'html.parser')
-                  events = sub_soup.select('article, .event, .calendar-item')
-                  
-                  for ev in events:
-                      title = ev.get_text(" ", strip=True).split('\n')[0][:80]
-                      if len(title) > 10:
-                          requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                              "name": title,
-                              "veranstalter": "Remstal Tourismus",
-                              "datum": "Gefunden",
-                              "link": full_url
-                          })
-              browser.close()
-          EOF
-          keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest", "weindorf", "besen", "ausschank"]
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              page = browser.new_page()
-              page.goto("https://remstal.de/events/kalender", wait_until="networkidle", timeout=60000)
-              
-              try: page.locator("button[data-testid='uc-accept-all-button']").click()
-              except: pass
-              
-              page.wait_for_timeout(3000)
-              soup = BeautifulSoup(page.content(), 'html.parser')
-              
-              # Jetzt suchen wir gezielt nach Links in den Event-Teasern
-              links = soup.find_all('a', href=True)
-              
-              found_count = 0
-              for a in links:
-                  text = a.get_text(" ", strip=True).lower()
-                  if any(k in text for k in keywords) and "/events/" in a['href']:
-                      full_link = f"https://remstal.de{a['href']}" if a['href'].startswith('/') else a['href']
-                      title = a.get_text(" ", strip=True).split('.')[0][:80]
+                  try:
+                      page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+                      sub_soup = BeautifulSoup(page.content(), 'html.parser')
                       
-                      print(f"-> Treffer: {title} | Link: {full_link}")
+                      # Suche nach Event-Containern (allgemein gehalten)
+                      events = sub_soup.select('article, .event, .entry')
                       
-                      # Ab in die Datenbank
-                      requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                          "name": title,
-                          "veranstalter": "Remstal Tourismus",
-                          "datum": "siehe Link",
-                          "link": full_link
-                      })
-                      found_count += 1
-              
-              print(f"-> Insgesamt {found_count} Deep-Links zu Events erfolgreich in die DB geladen.")
+                      for ev in events:
+                          title = ev.get_text(" ", strip=True).split('\n')[0][:80]
+                          if len(title) > 5:
+                              requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                                  "name": title,
+                                  "veranstalter": "Remstal Tourismus",
+                                  "datum": "siehe Link",
+                                  "link": full_url
+                              })
+                  except Exception as e:
+                      print(f"Fehler bei {full_url}: {e}")
               browser.close()
           EOF
