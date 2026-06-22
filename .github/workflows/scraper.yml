@@ -1,4 +1,4 @@
-name: Event-Komplett-Pipeline-V4-Fixed
+name: Event-DEBUG-Pipeline
 
 on:
   workflow_dispatch:
@@ -20,40 +20,29 @@ jobs:
           URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
           headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
           
-          base_url = "https://www.schwarzwald-tourismus.info"
-          target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
-          
-          # 1. Daten sicher löschen (die 'gte.0' Logik behalten wir bei)
-          requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
-          requests.delete(f"{URL}/rest/v1/suchworte?id=gte.0", headers=headers)
-          
-          # 2. Events laden (die bewährte V4 Logik)
+          # 1. Verbindung testen
+          target_url = "https://www.schwarzwald-tourismus.info/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
           response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
-          soup = BeautifulSoup(response.content, 'lxml')
-          events = soup.find_all('div', class_='c-headline__icon-wrapper')
+          print(f"DEBUG: Webseite Status Code: {response.status_code}")
           
+          soup = BeautifulSoup(response.content, 'lxml')
+          
+          # 2. Suche nach Boxen - wir probieren es breiter
+          # Wir suchen nach allen DIVs, die 'c-headline' im Klassennamen haben
+          events = soup.find_all('div', class_=lambda x: x and 'c-headline' in x)
+          print(f"DEBUG: Gefundene Event-Boxen: {len(events)}")
+          
+          if len(events) == 0:
+              print("FEHLER: Keine Elemente gefunden! Prüfe die Struktur.")
+              exit(1)
+          
+          # 3. Wenn was gefunden wurde, löschen wir erst jetzt (Sicherheit!)
+          requests.delete(f"{URL}/rest/v1/feste?id=gte.0", headers=headers)
+          
+          # 4. Import-Logik
           for e in events:
-              # Wir holen den vollen Text
-              raw_text = e.get_text(strip=True)
-              
-              # Bereinigungs-Logik: Falls der Name mit einem doppelten Wort beginnt (z.B. "FührungFührung"), reparieren wir das
-              # Wir teilen den String bei Großbuchstaben oder suchen nach Wiederholungen
-              name = raw_text
-              if name.startswith("FührungFührung"): name = name.replace("FührungFührung", "Führung", 1)
-              elif name.startswith("FlohmarktFlohmarkt"): name = name.replace("FlohmarktFlohmarkt", "Flohmarkt", 1)
-              elif name.startswith("ErntemarktErntemarkt"): name = name.replace("ErntemarktErntemarkt", "Erntemarkt", 1)
-              
+              name = e.get_text(strip=True)
               if len(name) > 5:
                   print(f"Importiere: {name}")
-                  
-                  # Event speichern
-                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
-                      "name": name, 
-                      "veranstalter": "Schwarzwald Tourismus"
-                  })
-                  
-                  # Suchworte
-                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
-                      if kw.lower() in name.lower():
-                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={"name": name, "veranstalter": "Schwarzwald Tourismus"})
           EOF
