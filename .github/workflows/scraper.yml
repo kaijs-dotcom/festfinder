@@ -1,4 +1,4 @@
-name: Profi Fest-Scraper (Deep Text-Radar)
+name: Profi Fest-Scraper (Smart Radar & Live Keywords)
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
 
-      - name: Deep Text-Radar ausführen
+      - name: Live Keywords & Smart Radar ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -43,6 +43,25 @@ jobs:
               "Prefer": "return=minimal"
           }
 
+          # 1. Live-Suchwörter aus Supabase laden (mit deinen neuen Wunsch-Favoriten als Fallback)
+          fallback_keywords = ["dorffest", "ortsfest", "feuerwehr", "musikverein", "festzelt", "musik", "hocketse", "fest"]
+          keywords = []
+          
+          try:
+              sw_res = requests.get(f"{URL}/rest/v1/suchworte", headers=headers)
+              if sw_res.ok and sw_res.json():
+                  keywords = [row['wort'].lower().strip() for row in sw_res.json() if 'wort' in row and row.get('wort')]
+              
+              if not keywords:
+                  print("-> Tabelle 'suchworte' ist leer. Nutze angepasste Standard-Suchwörter als Fallback.")
+                  keywords = fallback_keywords
+              else:
+                  print(f"-> {len(keywords)} Live-Suchwörter erfolgreich aus Supabase geladen: {keywords}")
+          except Exception as e:
+              print("Fehler beim Laden der Suchwörter aus Supabase, nutze angepasste Favoriten:", e)
+              keywords = fallback_keywords
+
+          # 2. Aktive Quellen laden
           try:
               res = requests.get(f"{URL}/rest/v1/quellen?aktiv_status=eq.true", headers=headers)
               quellen = res.json()
@@ -51,19 +70,17 @@ jobs:
               quellen = []
 
           for q in quellen:
-              print(f"--- Starte Deep-Text-Radar für: {q['beschreibung']} ---")
+              print(f"--- Starte Smart-Radar für: {q['beschreibung']} ---")
               found_events = []
 
               try:
                   with sync_playwright() as p:
                       browser = p.chromium.launch(headless=True)
                       page = browser.new_page()
-                      
-                      # Wir tun so, als wären wir ein echtes iPhone im Browser, um Sperren zu umgehen
                       page.set_viewport_size({"width": 375, "height": 812})
                       page.goto(q['url'], wait_until="networkidle", timeout=45000)
                       
-                      # Wir scrollen die Seite dreimal nach unten, falls Events erst beim Scrollen nachladen
+                      # Simuliere Scrollen gegen Lazy-Loading
                       for _ in range(3):
                           page.mouse.wheel(0, 1500)
                           page.wait_for_timeout(1000)
@@ -71,54 +88,52 @@ jobs:
                       soup = BeautifulSoup(page.content(), 'html.parser')
                       browser.close()
 
-                      # Wir holen uns den REINEN sichtbaren Text der kompletten Website
-                      # Jede Zeile wird einzeln geprüft
                       raw_lines = soup.get_text(separator="\n").split("\n")
                       lines = [l.strip() for l in raw_lines if l.strip()]
-                      print(f"   {len(lines)} Textzeilen von der Website geladen. Durchsuche nach Festen...")
+                      print(f"   {len(lines)} Textzeilen analysiert.")
 
-                      # Suchbegriffe für echte Feste & Ausschänke
-                      keywords = ["fest", "hocketse", "hock", "feuerwehr", "ausschank", "vinothek", "weindorf", "besen", "sommerfest", "weinfest", "kirbe"]
+                      # RegEx für deutsches Datum (z.B. 22.06. oder 22. Juni) oder Wochentage
+                      date_pattern = re.compile(r'(\d{1,2}\.\d{1,2}\.)|(\d{1,2}\s*(juni|juli|aug|sept|okt))', re.IGNORECASE)
+                      day_pattern = re.compile(r'(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|sa\.|so\.)', re.IGNORECASE)
 
                       for i, line in enumerate(lines):
-                          # Wenn in einer Zeile ein Treffer ist
                           if any(k in line.lower() for k in keywords):
-                              # Wir ignorieren statische Menütexte
-                              if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter"]):
+                              # Blockiere statische Menü-Begriffe rigoros
+                              if any(x in line.lower() for x in ["impressum", "datenschutz", "cookies", "alle anzeigen", "suche", "filter", "öffnungszeiten", "kontakt"]):
                                   continue
                               
-                              # Wir bauen einen Kontext aus der Zeile davor und danach (oft Datum + Ort)
-                              start_idx = max(0, i - 1)
-                              end_idx = min(len(lines), i + 2)
+                              start_idx = max(0, i - 2)
+                              end_idx = min(len(lines), i + 3)
                               context_chunk = lines[start_idx:end_idx]
                               
-                              # Erzeuge einen sauberen Event-Namen
-                              event_title = line
-                              if len(event_title) < 10: # Falls die Zeile zu kurz ist, nimm die nächste dazu
-                                  event_title = " | ".join(context_chunk)
+                              # Datums-Check im Umfeld
+                              has_date = False
+                              date_text = "Siehe Website"
+                              
+                              for chunk in context_chunk:
+                                  if date_pattern.search(chunk) or day_pattern.search(chunk):
+                                      has_date = True
+                                      if len(chunk) < 15 and (date_pattern.search(chunk) or day_pattern.search(chunk)):
+                                          date_text = chunk
+                                      else:
+                                          date_text = chunk[:30]
 
-                              if 8 < len(event_title) < 95:
-                                  if event_title not in [e["title"] for e in found_events]:
-                                      # Versuche ein Datum im Umkreis zu finden
-                                      date_guess = "Siehe Website"
-                                      for chunk in context_chunk:
-                                          if re.search(r'\d{1,2}\.\d{1,2}\.', chunk) or any(m in chunk.lower() for m in ["juni", "juli", "august", "september"]):
-                                              date_guess = chunk
-                                              break
-
+                              # Speicher-Filter (nur mit Datum & passender Länge)
+                              if has_date and 8 < len(line) < 95:
+                                  if line not in [e["title"] for e in found_events]:
                                       found_events.append({
-                                          "title": event_title,
-                                          "date": date_guess
+                                          "title": line,
+                                          "date": date_text
                                       })
 
               except Exception as err:
-                  print("Fehler beim Text-Radar:", err)
+                  print("Fehler im Smart-Radar:", err)
 
-              # Speichern in Supabase
+              # 3. In Supabase speichern
               saved_count = 0
               for ev in found_events[:25]:
                   name = ev["title"]
-                  datum = ev["date"][:30]
+                  datum = ev["date"]
                   
                   check = requests.get(f"{URL}/rest/v1/feste?name=eq.{name}", headers=headers)
                   if check.ok and len(check.json()) == 0:
@@ -131,5 +146,5 @@ jobs:
                       })
                       saved_count += 1
               
-              print(f"-> {len(found_events)} Feste im Text-Radar erkannt. {saved_count} neu gespeichert.")
+              print(f"-> {len(found_events)} echte Termine isoliert. {saved_count} neu gespeichert.")
           EOF
