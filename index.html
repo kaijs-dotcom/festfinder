@@ -13,7 +13,6 @@
             --text-muted: #7f8c8d;
             --border: #edf2f7;
             --accent-green: #27ae60;
-            --accent-blue: #2980b9;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
         body { background-color: var(--bg-app); color: var(--text-main); padding: 16px; padding-bottom: 80px; }
@@ -22,22 +21,13 @@
         .view { display: none; }
         .view.active { display: block; }
         .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 12px; font-weight: 700; }
-        .fest-card { background-color: var(--bg-card); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); border: 1px solid var(--border); }
+        .fest-card { background-color: var(--bg-card); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); border: 1px solid var(--border); cursor: pointer; }
         .fest-name { font-size: 16px; font-weight: 700; color: #1a202c; margin-bottom: 4px; }
         .fest-meta { display: flex; justify-content: space-between; border-top: 1px dashed var(--border); padding-top: 10px; font-size: 12px; font-weight: 600; margin-top: 10px; }
-        .fest-distance { color: var(--accent-green); }
-        
-        /* Formulare für das Backoffice */
-        .form-group { margin-bottom: 12px; }
-        label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text-main); }
-        input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: white; font-size: 14px; }
-        .btn { display: block; width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; text-align: center; }
-        
-        /* Navigation unten */
+        .btn { display: block; width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; text-align: center; }
         nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: white; border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
         .nav-item { font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: center; cursor: pointer; flex: 1; padding: 10px; }
         .nav-item.active { color: var(--primary); }
-        .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
     </style>
 </head>
 <body>
@@ -46,59 +36,37 @@
         <h1 id="headerTitle">⛺ Mein FestFinder</h1>
     </header>
 
-    <!-- ANSICHT 1: FESTE -->
     <div id="view-feste" class="view active">
-        <div class="section-title">Automatisch gefundene Feste</div>
-        <div id="festListContainer"><p style="text-align:center; color:var(--text-muted); padding:20px;">Lade Feste aus Datenbank...</p></div>
+        <div class="section-title">Aktuelle Feste im Remstal</div>
+        <div id="festListContainer"><p style="text-align:center; color:var(--text-muted); padding:20px;">Daten werden geladen...</p></div>
     </div>
 
-    <!-- ANSICHT 2: BACKOFFICE -->
     <div id="view-backoffice" class="view">
         <div class="section-title">Quellen-Backoffice</div>
-        <div class="fest-card">
-            <div class="form-group">
-                <label>Neue Quellen-URL (z.B. Eventseite, Vereinskalender)</label>
-                <input type="url" id="quelleUrl" placeholder="https://...">
-            </div>
-            <div class="form-group">
-                <label>Beschreibung / Name der Quelle</label>
-                <input type="text" id="quelleDesc" placeholder="z.B. MV Geislingen Termine">
-            </div>
-            <button class="btn" onclick="saveQuelle()">Quelle im Backoffice speichern 📁</button>
+        <div class="fest-card" style="cursor: default;">
+            <input type="url" id="quelleUrl" placeholder="https://..." style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ccc; border-radius:8px;">
+            <input type="text" id="quelleDesc" placeholder="Name der Quelle" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ccc; border-radius:8px;">
+            <button class="btn" onclick="saveQuelle()">Quelle speichern 📁</button>
         </div>
-        
-        <div class="section-title" style="margin-top: 20px;">Aktive Überwachungs-Quellen</div>
+        <div class="section-title" style="margin-top: 20px;">Überwachungs-Quellen</div>
         <div id="quellenListContainer"></div>
     </div>
 
-    <!-- NAVIGATION UNTEN -->
     <nav>
-        <div class="nav-item active" onclick="switchView('feste')" id="nav-feste">
-            <span class="nav-icon">🎪</span>Feste
-        </div>
-        <div class="nav-item" onclick="switchView('backoffice')" id="nav-backoffice">
-            <span class="nav-icon">⚙️</span>Backoffice
-        </div>
+        <div class="nav-item active" onclick="switchView('feste')" id="nav-feste"><span style="display:block; font-size:20px;">🎪</span>Feste</div>
+        <div class="nav-item" onclick="switchView('backoffice')" id="nav-backoffice"><span style="display:block; font-size:20px;">⚙️</span>Backoffice</div>
     </nav>
 
     <script>
-        // --- HIER DEINE ZUGANGSDATEN EINTRAGEN ---
         const SUPABASE_URL = "https://gxtkndjcpyxbxcgzkftf.supabase.co";
         const SUPABASE_KEY = "sb_publishable_R1C49lO3RszdfAYaDNbxIQ_2HioXmWD";
-        // -----------------------------------------
 
         function switchView(viewName) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            
             document.getElementById('view-' + viewName).classList.add('active');
             document.getElementById('nav-' + viewName).classList.add('active');
-            
-            if(viewName === 'feste') {
-                loadFeste();
-            } else {
-                loadQuellen();
-            }
+            if(viewName === 'feste') loadFeste(); else loadQuellen();
         }
 
         async function loadFeste() {
@@ -109,79 +77,39 @@
                 });
                 const data = await response.json();
                 container.innerHTML = '';
-                
-                if(!data || data.length === 0) {
-                    container.innerHTML = '<p style="text-align:center; color:#7f8c8d; padding:20px;">Noch keine Feste im Hintergrund gefunden.</p>';
-                    return;
-                }
-
                 data.forEach(f => {
                     container.innerHTML += `
-                        <div class="fest-card">
+                        <div class="fest-card" onclick="window.open('${f.link}', '_blank')">
                             <div class="fest-name">${f.name}</div>
-                            <div style="font-size:13px; color:var(--text-muted)">Veranstalter: ${f.veranstalter || 'Unbekannt'}</div>
+                            <div style="font-size:13px; color:var(--text-muted)">Quelle: ${f.veranstalter}</div>
                             <div class="fest-meta">
                                 <div>📅 ${f.datum}</div>
-                                <div class="fest-distance">📍 ${f.entfernung || '-'}</div>
+                                <div style="color:var(--primary)">🔗 Details</div>
                             </div>
                         </div>`;
                 });
-            } catch(e) {
-                container.innerHTML = '<p style="text-align:center; color:red; padding:20px;">Fehler beim Laden der Datenbank.</p>';
-            }
+            } catch(e) { container.innerHTML = '<p>Ladefehler.</p>'; }
         }
 
         async function loadQuellen() {
             const container = document.getElementById('quellenListContainer');
-            try {
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/quellen?select=*`, {
-                    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
-                });
-                const data = await response.json();
-                container.innerHTML = '';
-                
-                if(!data || data.length === 0) {
-                    container.innerHTML = '<p style="text-align:center; color:#7f8c8d; padding:10px;">Keine Überwachungs-Quellen hinterlegt.</p>';
-                    return;
-                }
-
-                data.forEach(q => {
-                    container.innerHTML += `
-                        <div class="fest-card" style="padding: 10px; font-size:13px;">
-                            <strong>${q.beschreibung}</strong><br>
-                            <span style="color:var(--text-muted); font-size:11px; word-break:break-all;">${q.url}</span>
-                        </div>`;
-                });
-            } catch(e) {}
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/quellen?select=*`, { headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }});
+            const data = await res.json();
+            container.innerHTML = data.map(q => `<div class="fest-card" style="cursor:default;"><strong>${q.beschreibung}</strong><br><small>${q.url}</small></div>`).join('');
         }
 
         async function saveQuelle() {
             const url = document.getElementById('quelleUrl').value;
             const desc = document.getElementById('quelleDesc').value;
-            
-            if(!url || !desc) { alert('Bitte beide Felder ausfüllen!'); return; }
-
-            try {
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/quellen`, {
-                    method: 'POST',
-                    headers: { 
-                        "apikey": SUPABASE_KEY, 
-                        "Authorization": `Bearer ${SUPABASE_KEY}`,
-                        "Content-Type": "application/json",
-                        "Prefer": "return=minimal"
-                    },
-                    body: JSON.stringify({ url: url, beschreibung: desc, aktiv_status: true })
-                });
-
-                if(response.ok) {
-                    document.getElementById('quelleUrl').value = '';
-                    document.getElementById('quelleDesc').value = '';
-                    loadQuellen();
-                } else { alert('Fehler beim Speichern.'); }
-            } catch(e) { alert('Verbindungsfehler.'); }
+            await fetch(`${SUPABASE_URL}/rest/v1/quellen`, {
+                method: 'POST',
+                headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ url, beschreibung: desc, aktiv_status: true })
+            });
+            loadQuellen();
         }
 
-        window.onload = () => { loadFeste(); };
+        loadFeste();
     </script>
 </body>
 </html>
