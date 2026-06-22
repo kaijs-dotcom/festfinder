@@ -1,26 +1,61 @@
-name: Event-Pipeline
+name: Event-Komplett-Pipeline-V4
+
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  run-pipeline:
+  import:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml
-        
-      - name: Run Crawler
-        run: python main.py
+      - name: Pipeline ausführen
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          pip install beautifulsoup4 requests lxml
+          python - << 'EOF'
+          import requests, os
+          from bs4 import BeautifulSoup
           
-      - name: Run Cleanup
-        run: python cleanup.py
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          URL, KEY = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+          headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
+          
+          base_url = "https://www.schwarzwald-tourismus.info"
+          target_url = f"{base_url}/schwarzwald/dorfurlaub/herrischried-und-rickenbach/veranstaltungen"
+          
+          # 1. Daten leeren
+          requests.delete(f"{URL}/rest/v1/feste", headers=headers)
+          requests.delete(f"{URL}/rest/v1/suchworte", headers=headers)
+          
+          # 2. Events extrahieren
+          response = requests.get(target_url, headers={"User-Agent": "FestFinder-Bot/2.0"})
+          soup = BeautifulSoup(response.content, 'lxml')
+          
+          # Wir suchen gezielt nach Links, die 'veranstaltungen' im Pfad haben
+          # Das schließt Breadcrumbs und Kontakt-Links automatisch aus
+          links = soup.find_all('a', href=True)
+          event_links = [l for l in links if '/veranstaltungen/' in l['href'] and len(l.get_text(strip=True)) > 5]
+          
+          # Uniques entfernen
+          seen_names = set()
+          
+          for link in event_links:
+              name = link.get_text(strip=True)
+              full_link = base_url + link['href']
+              
+              if name not in seen_names and name not in ['Breadcrumb', 'Navigation']:
+                  seen_names.add(name)
+                  print(f"Importiere: {name}")
+                  
+                  # Event speichern
+                  requests.post(f"{URL}/rest/v1/feste", headers=headers, json={
+                      "name": name, 
+                      "veranstalter": "Schwarzwald Tourismus",
+                      "link": full_link
+                  })
+                  
+                  # Suchworte
+                  for kw in ['Fest', 'Markt', 'Tour', 'Wanderung', 'Konzert']:
+                      if kw.lower() in name.lower():
+                          requests.post(f"{URL}/rest/v1/suchworte", headers=headers, json={"wort": kw})
+          EOF
